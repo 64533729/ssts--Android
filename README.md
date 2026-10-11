@@ -12,7 +12,7 @@
   https://gitee.com/whykan/ssxz/raw/master/Sources-v4.zip
   ```
 
-- **iOS 版 3.0**（未签名 ipa）：[ssts-ios-3.0-unsigned.ipa](https://github.com/whykang/ssts--Android/raw/main/release/ssts-ios-3.0-unsigned.ipa)
+- **iOS 版 4.0**（未签名 ipa，需要 iOS 17 及以上）：[ssts-ios-4.0-unsigned.ipa](https://github.com/whykang/ssts--Android/releases/download/v4.0/ssts-ios-4.0-unsigned.ipa)
 - 历史版本：[Releases](https://github.com/whykang/ssts--Android/releases)
 
 ## 最近更新
@@ -23,13 +23,13 @@
 - 评书随身听、相声随身听适配了网站新加的防护验证
 - 下载 [Sources-v4.zip](https://github.com/whykang/ssts--Android/releases/download/v4.0/Sources-v4.zip) 导入即可覆盖旧版本
 
-**程序（安卓 4.0）**
+**程序（安卓、iOS 4.0）**
 
-- 桌面小组件：多种尺寸，不打开应用就能播放、暂停、切集
+- 桌面小组件（仅安卓）：多种尺寸，不打开应用就能播放、暂停、切集
 - 定时关闭改成单独的弹窗：按时长或按集数（集数可自定义），可以设成播放时、锁屏时自动开启
 - 设置里新增“听书统计”：今天、近 7 天、累计听了多久，和每天时长的柱状图
 - 插件页支持自己建分组，分组可以折叠，搜索时可以只搜某个分组；源可以一键置顶
-- 新增“打开应用后自动播放”和“不被其他应用打断”两个开关（默认关闭）
+- 安卓新增“打开应用后自动播放”和“不被其他应用打断”两个开关（默认关闭）
 - 跳过片头片尾挪到了播放页；播放页可以调音量
 - 进入正在播放的书时，章节列表自动定位到当前这一集
 - 自定义电台可以选本地图片当图标
