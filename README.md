@@ -6,6 +6,12 @@
 
 - **安卓版 4.0**：[ssts-v4.apk](https://github.com/whykang/ssts--Android/releases/download/v4.0/ssts-v4.apk)
 - **插件包 4.0**（32 个源，安卓和 iOS 通用）：[Sources-v4.zip](https://github.com/whykang/ssts--Android/releases/download/v4.0/Sources-v4.zip)
+- **在线导入插件**：不用下载文件，在“插件”页选择从网址导入，填入下面的地址即可（国内网络可直接访问）
+
+  ```
+  https://gitee.com/whykan/ssxz/raw/master/Sources-v4.zip
+  ```
+
 - **iOS 版 3.0**（未签名 ipa）：[ssts-ios-3.0-unsigned.ipa](https://github.com/whykang/ssts--Android/raw/main/release/ssts-ios-3.0-unsigned.ipa)
 - 历史版本：[Releases](https://github.com/whykang/ssts--Android/releases)
 
