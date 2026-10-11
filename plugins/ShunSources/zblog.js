@@ -32,7 +32,7 @@
     multipleEpisodePages: true,
 
     search: function (keywords, page) {
-      var doc = Shun.getDoc(this.host, SITE + 'search.php?q=' + Shun.enc(keywords) + '&page=' + page, true);
+      var doc = this.host.parseHtml(Shun.cfPage(this.host, SITE + 'search.php?q=' + Shun.enc(keywords) + '&page=' + page), SITE + 'search.php?q=' + Shun.enc(keywords) + '&page=' + page);
       // 搜索结果是“部分”文章，按所属的书合并
       var books = [], seen = {};
       doc.select('.post_list_li h2 a').forEach(function (a) {
@@ -50,7 +50,7 @@
 
     // 艺人页顶部列出了他的全部书（子分类链接）
     categoryPage: function (url) {
-      var doc = Shun.getDoc(this.host, url, true);
+      var doc = this.host.parseHtml(Shun.cfPage(this.host, url), url);
       var code = (/psmp3\.com\/([a-z]+)\.html/.exec(url) || [])[1] || '';
       var artist = artistByCode(code);
       var re = new RegExp('psmp3\\.com/' + code + '-[a-z0-9]+\\.html$');
@@ -68,7 +68,7 @@
 
     bookDetail: function (bookUrl, loadEpisodes, loadFullPages) {
       var host = this.host;
-      var doc = Shun.getDoc(host, bookUrl, true);
+      var doc = host.parseHtml(Shun.cfPage(host, bookUrl), bookUrl);
       var intro = doc.first('.post_list_li p').text();
       var list = [];
       if (!loadEpisodes) return { episodes: list, intro: intro };
@@ -83,7 +83,7 @@
           if (parts.indexOf(href) < 0) parts.push(href);
         });
         var next = hasNext(current).absUrl('href');
-        if (next && !pages[next]) { pages[next] = true; current = Shun.getDoc(host, next, true); }
+        if (next && !pages[next]) { pages[next] = true; current = host.parseHtml(Shun.cfPage(host, next), next); }
         else current = null;
       }
       // 文章按发布时间倒序时，按“部分”编号排序
@@ -96,7 +96,7 @@
             host.progress((k + 1) + ' / ' + parts.length);
             host.sleep(200 + Math.random() * 300);
           }
-          Shun.aplayerItems(host.getString(parts[k], { desktop: true })).forEach(function (e) { list.push({ title: e.title, url: e.url }); });
+          Shun.aplayerItems(Shun.cfPage(host, parts[k])).forEach(function (e) { list.push({ title: e.title, url: e.url }); });
         }
       } finally {
         host.progress(null);
@@ -105,7 +105,11 @@
     },
 
     // 章节地址就是音频地址；不带 Referer 时音频服务器返回 403
-    audioHeaders: function (audioUrl) { return audioUrl.indexOf('psmp3.com') >= 0 ? { Referer: SITE } : null; }
+    // 章节地址就是音频地址。网站有人机验证，播放前确认一下音频放行了（没放行就先去过一次验证），
+    // 并且带上 Referer 和验证时用的那个 UA
+    audio: function (url) { return Shun.cfAudio(this.host, url, SITE); },
+
+    audioHeaders: function (audioUrl) { return audioUrl.indexOf('psmp3.com') >= 0 ? Shun.cfOptions(this.host, { Referer: SITE }).headers : null; }
   });
 })();
 
@@ -164,8 +168,8 @@
     }
     try {
       host.progress('正在建立搜索索引…');
-      if (!partial[1]) partial[1] = parseList(Shun.getDoc(host, SITE, true));
-      var last = partial.last || (partial.last = lastPageOf(Shun.getDoc(host, SITE, true), /\/page\/(\d+)\.html/, 1));
+      if (!partial[1]) partial[1] = parseList(host.parseHtml(Shun.cfPage(host, SITE), SITE));
+      var last = partial.last || (partial.last = lastPageOf(host.parseHtml(Shun.cfPage(host, SITE), SITE), /\/page\/(\d+)\.html/, 1));
       var todo = [];
       for (var p = 2; p <= last; p++) if (!partial[p]) todo.push(p);
       // 每批 12 页并发抓取，失败的页最多重试两次
@@ -173,7 +177,7 @@
         var failed = [];
         for (var i = 0; i < todo.length; i += 12) {
           var batch = todo.slice(i, i + 12);
-          var htmls = host.getStrings(batch.map(function (n) { return SITE + 'page/' + n + '.html'; }), { desktop: true }, 6);
+          var htmls = host.getStrings(batch.map(function (n) { return SITE + 'page/' + n + '.html'; }), Shun.cfOptions(host), 6);
           batch.forEach(function (n, k) {
             if (htmls[k] === null) failed.push(n);
             else partial[n] = parseList(host.parseHtml(htmls[k], SITE + 'page/' + n + '.html'));
@@ -235,7 +239,7 @@
 
     // 分类第 N 页为 /{code}/N.html，首页列表为 /page/N.html
     categoryPage: function (url) {
-      var doc = Shun.getDoc(this.host, url, true);
+      var doc = this.host.parseHtml(Shun.cfPage(this.host, url), url);
       var current = regexInt(url, /\/(\d+)\.html$/, 1);
       var total = lastPageOf(doc, /\/(\d+)\.html$/, current);
       return {
@@ -245,7 +249,7 @@
     },
 
     bookDetail: function (bookUrl) {
-      var html = this.host.getString(bookUrl, { desktop: true });
+      var html = Shun.cfPage(this.host, bookUrl);
       var doc = this.host.parseHtml(html, bookUrl);
       var tracks = Shun.aplayerItems(html);
       var h1 = doc.first('h1').text();
@@ -257,6 +261,10 @@
       };
     },
 
-    audioHeaders: function (audioUrl) { return audioUrl.indexOf('xsmp3.com') >= 0 ? { Referer: SITE } : null; }
+    // 章节地址就是音频地址。网站有人机验证，播放前确认一下音频放行了（没放行就先去过一次验证），
+    // 并且带上 Referer 和验证时用的那个 UA
+    audio: function (url) { return Shun.cfAudio(this.host, url, SITE); },
+
+    audioHeaders: function (audioUrl) { return audioUrl.indexOf('xsmp3.com') >= 0 ? Shun.cfOptions(this.host, { Referer: SITE }).headers : null; }
   });
 })();

@@ -333,12 +333,11 @@ function ptcmsSource(cfg) {
   });
 })();
 
-// 29听书网
-(function () {
-  var SITE = 'https://www.ting29.com/';
+// 29听书网 www.ting29.com 和 起点有声网 www.qdysw.com：两个站是同一套程序、同样的分类和页面，连书的编号都一样，只是域名不同
+function ting29Source(SITE, id, name, description) {
   ptcmsSource({
-    site: SITE, id: 'd4a8f1c63e9b47d2b5a0c7e91f3d6b28', name: '29听书网', cookie: 'pt_guid', parallel: 5, authorIsArtist: true,
-    description: '有声小说、长篇评书、相声曲艺、儿童、国学等，分类很细，更新快，音频是直链。章节很多的书加载要一点时间。',
+    site: SITE, id: id, name: name, cookie: 'pt_guid', parallel: 5, authorIsArtist: true,
+    description: description,
 
     // 搜索是表单提交；翻页是带着关键词的普通请求
     search: function (host, keywords, page, kit) {
@@ -380,7 +379,11 @@ function ptcmsSource(cfg) {
       return host.sniff(url, { desktop: true });
     }
   });
-})();
+}
+ting29Source('https://www.ting29.com/', 'd4a8f1c63e9b47d2b5a0c7e91f3d6b28', '29听书网',
+  '有声小说、长篇评书、相声曲艺、儿童、国学等，分类很细，更新快，音频是直链。章节很多的书加载要一点时间。');
+ting29Source('https://www.qdysw.com/', '3b7d5e0a9c1f4826a4e7d2c8f6b10e95', '起点有声网',
+  '有声小说、多人有声剧、长篇评书、相声曲艺、儿童、国学等，分类很细，更新快，音频是直链。章节很多的书加载要一点时间。');
 
 
 // ---------- 单田芳评书网 ----------

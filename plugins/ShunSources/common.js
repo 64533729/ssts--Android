@@ -45,6 +45,59 @@ var Shun = (function () {
       return AUDIO_EXTS.some(function (e) { return u.indexOf(e) >= 0; });
     },
 
+    /**
+     * 请求这类开了 Cloudflare“人机验证”的网站时用的选项。
+     * 验证通过后留下的 Cookie 是和当时的 UA 绑在一起的，所以验证和之后的请求必须用同一个 UA；
+     * 而且得是 WebView 自带的真实 UA——设置里那两个是冒充别的浏览器的，验证时会被识破。
+     * 旧版宿主拿不到真实 UA，就退回用手机版 UA 碰运气。
+     */
+    cfOptions: function (host, headers) {
+      var ua = typeof host.webViewUA === 'function' ? host.webViewUA() : '';
+      var o = { desktop: false, headers: headers || {} };
+      if (ua) o.headers['User-Agent'] = ua;
+      return o;
+    },
+
+    /**
+     * 取一个页面的 HTML，能应付 Cloudflare 的“人机验证”（普通请求会收到 403 和一个 “Just a moment...” 页面）。
+     * 真正的浏览器会自动通过这个验证，所以收到 403 时用内置的 WebView 把页面打开一次：验证通过后它会留下一个 Cookie，
+     * 普通请求带着这个 Cookie 和同一个 UA，之后就能正常访问了。
+     */
+    cfPage: function (host, url) {
+      try {
+        return host.getString(url, Shun.cfOptions(host));
+      } catch (e) {
+        if (e.status !== 403 && e.status !== 503) throw e;
+      }
+      var html = Shun.cfPass(host, url);
+      // 验证通过后普通请求一般就能用了；万一还是不行，就用 WebView 里拿到的这份
+      try { return host.getString(url, Shun.cfOptions(host)); } catch (e) { if (e.cancelled) throw e; return html; }
+    },
+
+    /** 用 WebView 打开页面，等人机验证自己通过，返回通过后的页面 HTML */
+    cfPass: function (host, url) {
+      try {
+        return host.render(url, {
+          desktop: false, nativeUA: true, timeout: 40000,
+          // 验证页的标题是 “Just a moment...”；正常页面里也会带 Cloudflare 的脚本，所以不能拿脚本地址来判断
+          parse: function (html) { return html.length > 3000 && html.indexOf('Just a moment') < 0 ? html : ''; }
+        });
+      } catch (e) {
+        if (e.cancelled) throw e;
+        host.log('人机验证没有自动通过：' + e.message);
+        throw new Error('网站开启了人机验证，这次没能自动通过，请稍后重试');
+      }
+    },
+
+    /** 播放前确认音频服务器放行；被人机验证拦住（403）时先去网站首页过一次验证。返回音频地址和要带的请求头 */
+    cfAudio: function (host, audioUrl, site) {
+      var o = Shun.cfOptions(host, { Referer: site, Range: 'bytes=0-1' });
+      var status = 0;
+      try { status = host.status(audioUrl, o); } catch (e) { if (e.cancelled) throw e; }
+      if (status === 403 || status === 503) Shun.cfPass(host, site);
+      return { url: audioUrl, headers: Shun.cfOptions(host, { Referer: site }).headers };
+    },
+
     getDoc: function (host, url, desktop, referer, encoding) {
       var o = { desktop: !!desktop };
       if (referer) o.headers = { Referer: referer };

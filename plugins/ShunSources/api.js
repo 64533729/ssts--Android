@@ -1064,3 +1064,792 @@
     }
   });
 })();
+
+// ---------- 心理FM fm.xinli001.com（壹心理的情感电台）----------
+// 网站上每期节目是单独的一条（几分钟到十几分钟）。这里把每期节目当成一本“书”：第一集是它自己，
+// 后面跟着网站给它排的连播列表（和在网页上听完一期自动接下一期是同一个列表），这样能一直听下去。
+// 列表类的接口返回的是一段 HTML，单期信息和连播列表是 JSON。
+(function () {
+  var SITE = 'https://fm.xinli001.com';
+  var MOODS = [['烦躁', 'fret'], ['悲伤', 'sad'], ['孤独', 'alone'], ['已弃疗', 'hehe'], ['减压', 'relax'], ['无奈', 'helpless'], ['快乐', 'happy'], ['感动', 'moved'], ['迷茫', 'confused']];
+  var PLACES = [['睡前', 'bed'], ['旅行', 'trip'], ['散步', 'walk'], ['坐车', 'bus'], ['独处', 'one'], ['失恋', 'miss'], ['失眠', 'sleepless'], ['无聊', 'boring'], ['随便', 'casual']];
+  var CACHE = 'xinlifm-home.txt';
+  var CACHE_LIFETIME = 3 * 3600 * 1000;
+  var HOT_PAGE = 30;
+
+  // 请求都用 WebView 自带的那个 UA（旧版宿主拿不到就用手机版的）：过防护验证时用的是 WebView，前后得是同一个 UA
+  function options() { return Shun.cfOptions(host0, { Referer: SITE + '/', 'X-Requested-With': 'XMLHttpRequest' }); }
+  var host0 = null;
+
+  // 网站前面有阿里云的防护：有时不给内容，而是给一个要浏览器算一下才能通过的验证页
+  function blocked(text) { return text.indexOf('renderData') >= 0 && text.indexOf('arg1') >= 0; }
+
+  function get(host, path) {
+    host0 = host;
+    var text = host.getString(SITE + path, options());
+    if (!blocked(text)) return text;
+    // 用 WebView 把首页打开一次，它会算出通过验证的 Cookie；普通请求之后带着这个 Cookie 就行
+    try {
+      host.render(SITE + '/', { nativeUA: true, timeout: 30000, parse: function (html) { return html.indexOf('menuitem') >= 0 ? '1' : ''; } });
+    } catch (e) {
+      if (e.cancelled) throw e;
+      host.log('心理FM 的防护验证没有自动通过：' + e.message);
+    }
+    text = host.getString(SITE + path, options());
+    if (blocked(text)) throw new Error('网站的防护验证没有通过，请稍后重试');
+    return text;
+  }
+
+  function bookUrl(pk) { return SITE + '/' + pk; }
+  function episodeUrl(pk) { return SITE + '/broadcast?pk=' + pk; }
+  function pkOf(url) { return (/(?:pk=|\/)(\d+)$/.exec(String(url)) || [])[1] || ''; }
+  // 列表里给的是 80 像素的小图（地址后面带 !80），去掉后缀就是原图
+  function fullCover(url) { return String(url || '').replace(/![0-9a-z]+$/i, ''); }
+  function decode(s) { return String(s || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/\s+/g, ' ').trim(); }
+
+  // 一段列表 HTML 里的节目。每条的样子：
+  // <a href="/123" data-pk="123" class="broadcast"><img src="封面!80"></a> … <a … class="broadcast broadcast_title">标题</a> <span>主播 某某</span>
+  function parseList(html) {
+    var re = /<a href="\/(\d+)" data-pk="\d+" class="broadcast"><img src="([^"]*)"[^>]*><\/a>[\s\S]*?class="broadcast broadcast_title">([^<]*)<\/a>\s*<span>主播\s*([^<]*)<\/span>/g;
+    var list = [], seen = {}, m;
+    while ((m = re.exec(html)) !== null) {
+      if (seen[m[1]]) continue;
+      seen[m[1]] = true;
+      list.push({ bookUrl: bookUrl(m[1]), title: decode(m[3]), artist: decode(m[4]), coverUrl: fullCover(m[2]) });
+    }
+    return list;
+  }
+
+  // 首页那一大段（1 MB 多）：前 20 条是最新的，后面几千条是最热的。取一次存起来，几个小时内不再取
+  function home(host) {
+    var age = host.cacheAge(CACHE);
+    if (age >= 0 && age < CACHE_LIFETIME) {
+      var cached = (host.readCache(CACHE) || '').split('\n').map(function (l) { return l.split('\t'); })
+        .filter(function (p) { return p.length === 4; })
+        .map(function (p) { return { bookUrl: bookUrl(p[0]), title: p[1], artist: p[2], coverUrl: p[3] }; });
+      if (cached.length > 20) return cached;
+    }
+    var list = parseList(get(host, '/fragment?t=' + Date.now() + '&n=lastest'));
+    if (list.length > 20) {
+      host.writeCache(CACHE, list.map(function (b) { return [pkOf(b.bookUrl), b.title.replace(/[\t\n]/g, ' '), b.artist.replace(/[\t\n]/g, ' '), b.coverUrl].join('\t'); }).join('\n'));
+    }
+    return list;
+  }
+
+  function info(host, pk) {
+    var json = parseJson(get(host, '/broadcast?pk=' + pk));
+    var data = json && json.data;
+    if (!data || !str(data, 'id')) throw new Error('没有找到这期节目');
+    return data;
+  }
+
+  function tagTabs(list) { return list.map(function (t) { return { title: t[0], url: 'xinlifm:tag:' + t[1] + ':' + t[0] }; }); }
+
+  registerSource({
+    id: '6e2f9a8c41b74d0e9c35a7d1f08b6e42', name: '心理FM', url: SITE + '/',
+    description: '壹心理的情感电台：睡前、失眠、减压、失恋……每期几分钟到十几分钟。可以按心情和场景找，也可以搜节目名或主播名。',
+    group: '电台',
+
+    categoryMenus: function () {
+      return [
+        { title: '推荐', tabs: [{ title: '最新', url: 'xinlifm:new' }, { title: '最热', url: 'xinlifm:hot' }] },
+        { title: '心情', tabs: tagTabs(MOODS) },
+        { title: '场景', tabs: tagTabs(PLACES) }
+      ];
+    },
+
+    categoryPage: function (url) {
+      var host = this.host;
+      var parts = String(url).split('#'), page = parseInt(parts[1] || '1', 10) || 1, key = parts[0];
+      var m = /^xinlifm:tag:([a-z]+):(.+)$/.exec(key);
+      if (m) {
+        // 第一页网站自己用的是 page=标签名，后面的页才是数字
+        var books = parseList(get(host, '/tagshow?p=' + m[1] + '&page=' + (page === 1 ? m[1] : page) + '&n=' + encodeURIComponent(m[2])));
+        var more = books.length >= 20;
+        return { books: books, currentPage: page, totalPage: more ? page + 1 : page, nextUrl: more ? key + '#' + (page + 1) : null };
+      }
+      var all = home(host);
+      if (key === 'xinlifm:new') return { books: all.slice(0, 20), currentPage: 1, totalPage: 1 };
+      var hot = all.slice(20), total = Math.max(1, Math.ceil(hot.length / HOT_PAGE));
+      return { books: hot.slice((page - 1) * HOT_PAGE, page * HOT_PAGE), currentPage: page, totalPage: total, nextUrl: page < total ? key + '#' + (page + 1) : null };
+    },
+
+    // 网站的搜索只稳定地给第一页（20 条），可以搜节目名、主播名、心情和场景
+    search: function (keywords, page) {
+      if (page > 1) return { books: [], totalPage: page - 1 };
+      return { books: parseList(get(this.host, '/search?q=' + encodeURIComponent(keywords))), totalPage: 1 };
+    },
+
+    bookDetail: function (url, loadEpisodes) {
+      var host = this.host, pk = pkOf(url);
+      var data = info(host, pk);
+      var detail = {
+        title: str(data, 'title').trim(), artist: str(data, 'speak'), intro: str(data, 'content').trim(),
+        coverUrl: fullCover(str(data, 'cover')), episodes: [{ title: str(data, 'title').trim(), url: episodeUrl(pk) }]
+      };
+      if (!loadEpisodes) return detail;
+      // 网站给这期节目排的连播列表（第一条是它自己），标题要一期期去问
+      try {
+        var queue = items(parseJson(get(host, '/broadcast-pk-list?pk=' + pk + '&id=' + encodeURIComponent(str(data, 'jingxuan_id')))), 'data')
+          .map(String).filter(function (id) { return /^\d+$/.test(id) && id !== pk; });
+        host0 = host;
+        var texts = host.getStrings(queue.map(function (id) { return SITE + '/broadcast?pk=' + id; }), options(), 5);
+        queue.forEach(function (id, i) {
+          var title = '';
+          try { title = str(parseJson(texts[i]), 'data.title').trim(); } catch (e) { title = ''; }
+          if (title) detail.episodes.push({ title: title, url: episodeUrl(id) });
+        });
+      } catch (e) { if (e.cancelled) throw e; }
+      detail.status = detail.episodes.length > 1 ? '连播 ' + detail.episodes.length + ' 期' : '';
+      return detail;
+    },
+
+    audio: function (url) {
+      var audio = str(info(this.host, pkOf(url)), 'url');
+      if (!audio) throw new Error('这期节目没有给出音频地址');
+      return { url: audio.replace(/^http:/, 'https:'), headers: { Referer: SITE + '/' } };
+    }
+  });
+})();
+
+// ---------- 网易云音乐 music.163.com：分成“网易云播客”和“网易云音乐”两个源 ----------
+// 用的是网页版的接口。
+// 播客：每个“播客 / 电台”是一本书，里面的节目是章节；节目的声音是一首“歌”，播放时用歌的编号去要地址。
+// 音乐：歌单、专辑、排行榜各是一本书，里面的歌是章节；搜到的单曲是只有一集的书。登录后能看到自己的歌单。
+// 登录状态就是在 App 内网页里登录后留下的 Cookie（和普通请求共用），两个源登录一次就都有了；会员或已购买的内容登录后才能听。
+(function () {
+  var SITE = 'https://music.163.com';
+  var API = SITE + '/api';
+  var PAGE = 30;
+  // 播客的分类（网站“播客”页上的那些），有声书相关的排在前面
+  var CATEGORIES = [['有声书', 10001], ['广播剧', 3088097], ['相声曲艺', 3088098], ['故事', 3080097], ['人文历史', 3080098], ['文学出版', 3148096],
+    ['知识', 11], ['情感', 3], ['脱口秀', 8], ['亲子', 13], ['生活', 6], ['资讯', 3087096], ['娱乐', 3083097], ['二次元', 3001],
+    ['音乐播客', 2], ['创作翻唱', 2001], ['明星专区', 14], ['其他', 3081098]];
+
+  // body 不为空时用 POST 提交（表单格式）
+  function api(host, path, body) {
+    var o = { desktop: true, headers: { Referer: SITE + '/' } };
+    if (body) { o.method = 'POST'; o.body = body; }
+    var json = host.getJson(API + path, o);
+    var code = int(json, 'code', 200);
+    if (code === 301) throw new Error('需要登录网易云音乐：到插件页点这个源的“登录”');
+    if (code !== 200) throw new Error('网易云音乐：' + (str(json, 'message') || str(json, 'msg') || '接口返回错误 ' + code));
+    return json;
+  }
+
+  function bookUrl(id) { return SITE + '/djradio?id=' + id; }
+  function radioId(url) { return (/[?&]id=(\d+)/.exec(String(url)) || [])[1] || ''; }
+  // 封面地址后面加上尺寸，网站会给缩小过的图
+  function cover(url) { return url ? String(url).replace(/^http:/, 'https:') + '?param=300y300' : ''; }
+  function paid(radio) { return int(radio, 'radioFeeType') !== 0 || int(radio, 'price') > 0; }
+
+  var LOGIN = {
+    // 手机上先给手机版的登录页（手机号 / 扫码）；右上角可以换成电脑版网页
+    loginUrl: SITE + '/m/login', loginDesktop: false, loginAltUrl: SITE + '/#/login',
+    // 已登录时返回昵称
+    checkLogin: function () {
+      var name = str(api(this.host, '/nuser/account/get'), 'profile.nickname');
+      if (!name) throw new Error('还没有登录网易云音乐');
+      return name;
+    }
+  };
+
+  // 用歌的编号去要播放地址。地址有时效，所以每次播放时现取
+  function songAudio(host, song) {
+    var data = at(api(host, '/song/enhance/player/url/v1?ids=' + encodeURIComponent('[' + song + ']') + '&level=standard&encodeType=mp3'), 'data.0') || {};
+    var audio = str(data, 'url');
+    if (!audio) {
+      // 没给地址：一般是要会员、要购买，没有版权，或者没有登录
+      throw new Error(int(data, 'fee') > 0 || int(data, 'code') === 404 ? '这一首需要会员或购买后才能听（登录自己的账号后再试）' : '网易云音乐没有给出播放地址（可能没有版权）');
+    }
+    // 会员歌曲没开会员时，网站只给一小段试听
+    if (data.freeTrialInfo) host.toast('这首歌只能试听一小段（需要会员）');
+    return { url: audio.replace(/^http:/, 'https:'), headers: { Referer: SITE + '/' } };
+  }
+
+  function toBook(radio) {
+    var count = int(radio, 'programCount');
+    return {
+      bookUrl: bookUrl(str(radio, 'id')), title: str(radio, 'name').trim(), artist: str(radio, 'dj.nickname'),
+      coverUrl: cover(str(radio, 'picUrl')), intro: str(radio, 'desc').trim(),
+      status: [str(radio, 'category'), count > 0 ? count + ' 期' : '', paid(radio) ? '付费' : ''].filter(function (x) { return x.length > 0; }).join(' · ')
+    };
+  }
+
+  registerSource({
+    id: '9d3c7a15e8b24f60a1c5d79e3b04f862', name: '网易云播客', url: SITE + '/',
+    description: '网易云音乐的播客：有声书、广播剧、相声曲艺、故事、人文历史等。免费的节目不用登录；会员或购买过的内容，在插件页“登录”自己的账号后可以听。',
+    multipleEpisodePages: true,
+    loginUrl: LOGIN.loginUrl, loginDesktop: LOGIN.loginDesktop, loginAltUrl: LOGIN.loginAltUrl, checkLogin: LOGIN.checkLogin,
+
+    categoryMenus: function () {
+      return [{ title: '播客', tabs: [{ title: '热门', url: 'netease:hot' }].concat(CATEGORIES.map(function (c) { return { title: c[0], url: 'netease:cate:' + c[1] }; })) }];
+    },
+
+    categoryPage: function (url) {
+      var parts = String(url).split('#'), page = parseInt(parts[1] || '1', 10) || 1, key = parts[0];
+      var offset = (page - 1) * PAGE;
+      var m = /^netease:cate:(\d+)$/.exec(key);
+      var json = m ? api(this.host, '/djradio/hot?cateId=' + m[1] + '&limit=' + PAGE + '&offset=' + offset)
+        : api(this.host, '/djradio/hot/v1?limit=' + PAGE + '&offset=' + offset);
+      var books = items(json, 'djRadios').map(toBook);
+      var more = json.hasMore === true && books.length > 0;
+      return { books: books, currentPage: page, totalPage: more ? page + 1 : page, nextUrl: more ? key + '#' + (page + 1) : null };
+    },
+
+    search: function (keywords, page) {
+      var json = api(this.host, '/search/get?s=' + encodeURIComponent(keywords) + '&type=1009&limit=' + PAGE + '&offset=' + (page - 1) * PAGE);
+      var books = items(json, 'result.djRadios').map(toBook);
+      var total = Math.ceil(int(json, 'result.djRadiosCount') / PAGE);
+      return { books: books, totalPage: books.length === 0 ? page : Math.max(page, total) };
+    },
+
+    bookDetail: function (url, loadEpisodes, loadFullPages) {
+      var host = this.host, id = radioId(url);
+      var radio = at(api(host, '/djradio/get?id=' + id), 'djRadio') || {};
+      var detail = {
+        title: str(radio, 'name').trim(), artist: str(radio, 'dj.nickname'), intro: str(radio, 'desc').trim(),
+        coverUrl: cover(str(radio, 'picUrl')), episodes: []
+      };
+      if (!loadEpisodes) return detail;
+      // 节目按期数从前往后排，一页 200 期
+      var size = 200;
+      try {
+        for (var offset = 0; offset < 20000; offset += size) {
+          if (offset > 0) host.progress(Math.min(offset + size, int(radio, 'programCount')) + ' / ' + int(radio, 'programCount'));
+          var json = api(host, '/dj/program/byradio?radioId=' + id + '&limit=' + size + '&offset=' + offset + '&asc=true');
+          var list = items(json, 'programs');
+          list.forEach(function (p) {
+            var song = str(p, 'mainSong.id') || str(p, 'mainTrackId');
+            if (!song) return;
+            detail.episodes.push({
+              title: str(p, 'name').trim(), url: SITE + '/program?id=' + str(p, 'id') + '&song=' + song,
+              // 收费的节目没买过就标成付费（能不能听以登录后的账号为准）
+              isFree: int(p, 'programFeeType') === 0 || p.buyed === true
+            });
+          });
+          if (!loadFullPages || json.more !== true || list.length === 0) break;
+        }
+      } finally {
+        host.progress(null);
+      }
+      var count = int(radio, 'programCount');
+      detail.status = [radio.finished === true ? '完结' : '', count > 0 ? count + ' 期' : '', paid(radio) ? '付费' : ''].filter(function (x) { return x.length > 0; }).join(' · ');
+      return detail;
+    },
+
+    // 节目的声音是一首“歌”，用它的编号去要播放地址
+    audio: function (url) {
+      var song = (/[?&]song=(\d+)/.exec(String(url)) || [])[1];
+      if (!song) throw new Error('不认识的章节地址：' + url);
+      return songAudio(this.host, song);
+    }
+  });
+
+  // ================= 音乐 =================
+  var STYLES = ['华语', '流行', '摇滚', '民谣', '电子', '说唱', '轻音乐', '古风', '怀旧', '影视原声', 'ACG', '粤语', '欧美', '日语', '韩语', '古典', '爵士', '儿童'];
+  var BATCH = 300; // 一次问多少首歌的信息
+
+  function idOf(url) { return (/[?&]id=(\d+)/.exec(String(url)) || [])[1] || ''; }
+  function names(list) { return (list || []).map(function (a) { return str(a, 'name'); }).filter(function (n) { return n.length > 0; }).join(' / '); }
+  // fee：0 免费，8 免费（高音质要会员），1 会员才能听，4 要买专辑
+  function songFree(fee) { return fee !== 1 && fee !== 4; }
+
+  // 歌曲的两种写法都认：新接口是 ar / al，搜索接口是 artists / album
+  function songEpisode(song, fee) {
+    var who = names(song.ar || song.artists);
+    return {
+      title: str(song, 'name').trim() + (who ? ' - ' + who : ''), url: SITE + '/song?id=' + str(song, 'id'),
+      isFree: songFree(fee === undefined ? int(song, 'fee') : fee)
+    };
+  }
+
+  function playlistBook(p) {
+    var count = int(p, 'trackCount');
+    return {
+      bookUrl: SITE + '/playlist?id=' + str(p, 'id'), title: str(p, 'name').trim(), artist: str(p, 'creator.nickname'),
+      coverUrl: cover(str(p, 'coverImgUrl') || str(p, 'picUrl')), intro: (str(p, 'description') || str(p, 'copywriter')).trim(),
+      status: [count > 0 ? count + ' 首' : '', str(p, 'updateFrequency')].filter(function (x) { return x.length > 0; }).join(' · ') || '歌单'
+    };
+  }
+
+  // 按编号问一批歌的信息（歌名、歌手、是否收费）
+  function songsByIds(host, ids) {
+    var json = api(host, '/v3/song/detail', 'c=' + encodeURIComponent(JSON.stringify(ids.map(function (id) { return { id: id }; }))));
+    var fees = {};
+    items(json, 'privileges').forEach(function (p) { fees[str(p, 'id')] = int(p, 'fee'); });
+    var byId = {};
+    items(json, 'songs').forEach(function (song) { byId[str(song, 'id')] = song; });
+    // 按歌单里的顺序排
+    return ids.map(function (id) { return byId[String(id)]; }).filter(function (song) { return !!song; })
+      .map(function (song) { return { song: song, fee: fees[str(song, 'id')] }; });
+  }
+
+  registerSource({
+    id: '2f8b6d4a0c9e43f7b15a8e6d3c7f0a94', name: '网易云音乐', url: SITE + '/',
+    description: '网易云音乐的歌单、排行榜和单曲。歌单、专辑是一本“书”，里面的歌是章节。在插件页“登录”自己的账号后，发现页的“我的歌单”里能看到自己创建和收藏的歌单；会员歌曲没开会员时只能试听一小段。',
+    group: '音乐',
+    multipleEpisodePages: true,
+    loginUrl: LOGIN.loginUrl, loginDesktop: LOGIN.loginDesktop, loginAltUrl: LOGIN.loginAltUrl, checkLogin: LOGIN.checkLogin,
+
+    categoryMenus: function () {
+      return [
+        { title: '推荐', tabs: [{ title: '推荐歌单', url: 'ncm:recommend' }, { title: '我的歌单', url: 'ncm:mine' }, { title: '排行榜', url: 'ncm:top' }] },
+        { title: '歌单', tabs: [{ title: '全部', url: 'ncm:cat:全部' }].concat(STYLES.map(function (n) { return { title: n, url: 'ncm:cat:' + n }; })) }
+      ];
+    },
+
+    categoryPage: function (url) {
+      var host = this.host;
+      var parts = String(url).split('#'), page = parseInt(parts[1] || '1', 10) || 1, key = parts[0];
+      function one(list) { return { books: list.map(playlistBook), currentPage: 1, totalPage: 1 }; }
+      if (key === 'ncm:mine') {
+        var uid = str(api(host, '/nuser/account/get'), 'account.id');
+        if (!uid) throw new Error('还没有登录网易云音乐：到“插件”页点开这个源，点“登录”');
+        // 自己创建的在前（第一个是“我喜欢的音乐”），后面是收藏的
+        return one(items(api(host, '/user/playlist?uid=' + uid + '&limit=300&offset=0'), 'playlist'));
+      }
+      if (key === 'ncm:recommend') return one(items(api(host, '/personalized/playlist?limit=30'), 'result'));
+      if (key === 'ncm:top') return one(items(api(host, '/toplist'), 'list'));
+      var cat = key.replace(/^ncm:cat:/, '');
+      var json = api(host, '/playlist/list?cat=' + encodeURIComponent(cat) + '&order=hot&limit=' + PAGE + '&offset=' + (page - 1) * PAGE);
+      var books = items(json, 'playlists').map(playlistBook);
+      var more = json.more === true && books.length > 0;
+      return { books: books, currentPage: page, totalPage: more ? page + 1 : page, nextUrl: more ? key + '#' + (page + 1) : null };
+    },
+
+    // 搜出来的主要是单曲（每首是只有一集的“书”）；第一页后面再跟几张专辑和几个歌单
+    search: function (keywords, page) {
+      var host = this.host, q = encodeURIComponent(keywords);
+      var json = api(host, '/search/get?s=' + q + '&type=1&limit=' + PAGE + '&offset=' + (page - 1) * PAGE);
+      var books = items(json, 'result.songs').map(function (song) {
+        return {
+          bookUrl: SITE + '/song?id=' + str(song, 'id'), title: str(song, 'name').trim(), artist: names(song.artists),
+          coverUrl: cover(str(song, 'album.picUrl')), status: ['单曲', str(song, 'album.name')].filter(function (x) { return x.length > 0; }).join(' · ')
+        };
+      });
+      var total = Math.max(page, Math.ceil(int(json, 'result.songCount') / PAGE));
+      if (page === 1) {
+        try {
+          items(api(host, '/search/get?s=' + q + '&type=10&limit=5&offset=0'), 'result.albums').forEach(function (al) {
+            books.push({
+              bookUrl: SITE + '/album?id=' + str(al, 'id'), title: str(al, 'name').trim(), artist: str(al, 'artist.name'),
+              coverUrl: cover(str(al, 'picUrl') || str(al, 'blurPicUrl')), status: '专辑' + (int(al, 'size') > 0 ? ' · ' + int(al, 'size') + ' 首' : '')
+            });
+          });
+          items(api(host, '/search/get?s=' + q + '&type=1000&limit=8&offset=0'), 'result.playlists').forEach(function (p) { books.push(playlistBook(p)); });
+        } catch (e) { if (e.cancelled) throw e; }
+      }
+      return { books: books, totalPage: books.length === 0 ? page : total };
+    },
+
+    bookDetail: function (url, loadEpisodes, loadFullPages) {
+      var host = this.host, id = idOf(url), detail = { episodes: [] };
+      if (/\/song\?/.test(url)) {
+        // 单曲：只有它自己这一集
+        var one = songsByIds(host, [id])[0];
+        if (!one) throw new Error('没有找到这首歌');
+        detail.title = str(one.song, 'name').trim(); detail.artist = names(one.song.ar);
+        detail.coverUrl = cover(str(one.song, 'al.picUrl')); detail.status = ['单曲', str(one.song, 'al.name')].filter(function (x) { return x.length > 0; }).join(' · ');
+        detail.episodes.push(songEpisode(one.song, one.fee));
+        return detail;
+      }
+      if (/\/album\?/.test(url)) {
+        var album = api(host, '/v1/album/' + id);
+        detail.title = str(album, 'album.name').trim(); detail.artist = str(album, 'album.artist.name');
+        detail.coverUrl = cover(str(album, 'album.picUrl')); detail.intro = str(album, 'album.description').trim();
+        items(album, 'songs').forEach(function (song) { detail.episodes.push(songEpisode(song)); });
+        detail.status = '专辑 · ' + detail.episodes.length + ' 首';
+        return detail;
+      }
+      // 歌单：详情里只带着前几首歌的信息，但有全部歌的编号，按编号一批批去问
+      var list = at(api(host, '/v6/playlist/detail?id=' + id + '&n=1000'), 'playlist') || {};
+      detail.title = str(list, 'name').trim(); detail.artist = str(list, 'creator.nickname');
+      detail.coverUrl = cover(str(list, 'coverImgUrl')); detail.intro = str(list, 'description').trim();
+      var ids = items(list, 'trackIds').map(function (t) { return str(t, 'id'); }).filter(function (x) { return x.length > 0; });
+      detail.status = ids.length + ' 首';
+      if (!loadEpisodes) return detail;
+      try {
+        for (var i = 0; i < ids.length; i += BATCH) {
+          if (i > 0) host.progress(Math.min(i + BATCH, ids.length) + ' / ' + ids.length);
+          songsByIds(host, ids.slice(i, i + BATCH)).forEach(function (x) { detail.episodes.push(songEpisode(x.song, x.fee)); });
+          if (!loadFullPages) break;
+        }
+      } finally {
+        host.progress(null);
+      }
+      return detail;
+    },
+
+    audio: function (url) {
+      var song = idOf(url);
+      if (!song) throw new Error('不认识的章节地址：' + url);
+      return songAudio(this.host, song);
+    }
+  });
+})();
+
+// 央视网栏目类的源（百家讲坛、新闻联播）共用：章节地址里带着节目编号（guid），用它问央视网要播放地址（HLS），和央视听音是同一个接口
+function cntvAudio(host, url) {
+  var m = /[?&]guid=([0-9a-fA-F]+)/.exec(url);
+  if (!m) throw new Error('不认识的章节地址：' + url);
+  var json = host.getJson('https://vdn.apps.cntv.cn/api/getHttpVideoInfo.do?pid=' + m[1], { headers: { Referer: 'https://tv.cctv.com/' } });
+  var hls = str(json, 'hls_url');
+  if (!hls) throw new Error('央视网没有给出这期节目的播放地址' + (str(json, 'tip_msg') ? '：' + str(json, 'tip_msg') : '（可能有版权限制）'));
+  return { url: hls, headers: { Referer: 'https://tv.cctv.com/', 'X-Media-Type': 'hls' } };
+}
+
+// ---------- 百家讲坛（tv.cctv.com/lm/bjjt）：CCTV-10 的讲座栏目，用央视网栏目页自己的接口 ----------
+// 网站只有“某年播过的每一期节目”这一种列表，没有按系列分的。这里按节目标题把同一个系列的各期归到一起，
+// 一个系列是一本书（例如“宋朝那些人和事儿（第二部）”），标题看不出系列的单期节目放进那一年的“其他节目”。
+// 和央视听音一样没有单独的音频文件，播的是节目视频的声音。
+(function () {
+  var SITE = 'https://tv.cctv.com';
+  var PAGE = SITE + '/lm/bjjt/index.shtml';
+  var TOPIC = 'TOPC1451557052519584';
+  var API = 'https://api.cntv.cn/';
+  var FIRST_YEAR = 2009;
+  var OTHER = '_';
+  var years = {};   // 这次运行里已经取过的年份
+
+  function options() { return { headers: { Referer: PAGE } }; }
+  function thisYear() { return new Date().getFullYear(); }
+
+  var DIGITS = { '零': 0, '〇': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9 };
+  // “二十六”“一百零三”“17”“③”这些写法的期数
+  function number(s) {
+    s = String(s);
+    if (/^\d+$/.test(s)) return parseInt(s, 10);
+    if (s.length === 1 && s >= '①' && s <= '⑳') return s.charCodeAt(0) - 0x2460 + 1;
+    var total = 0, current = 0;
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charAt(i);
+      if (c === '百') { total += (current || 1) * 100; current = 0; }
+      else if (c === '十') { total += (current || 1) * 10; current = 0; }
+      else if (DIGITS[c] !== undefined) current = DIGITS[c];
+      else return 0;
+    }
+    return total + current;
+  }
+
+  // 标题里“第几期”的几种写法，谁先出现用谁：（二十六） / ③ / 第11集 / 后面跟空格的数字 / 紧贴着标题的数字
+  var MARKS = [
+    /[（(]\s*([一二两三四五六七八九十百零〇\d]+)\s*[）)]/,
+    /([①-⑳])/,
+    /\s*第\s*(\d+)\s*[集讲期]/,
+    /\s*(\d+)(?=\s|$)/,
+    /[）)》\s](\d+)(?=[^\d\s讲年月日期集部季])/
+  ];
+
+  // 把一期节目的标题拆成：系列名、第几期、这一期自己的标题。常见的样子：
+  // 《百家讲坛》 20240331 宋朝那些人和事儿（第二部） 1 柴荣的心愿 / 百家讲坛经典 明亡清兴六十年（七）萨尔浒大败 / 《百家讲坛》 20130917 女皇武则天17 轻松摆平大叛乱
+  function parseTitle(raw) {
+    var text = String(raw || '').replace(/\s+/g, ' ').trim()
+      .replace(/^《百家讲坛》\s*/, '').replace(/^百家讲坛(经典)?\s+/, '').replace(/^\d{8}\s*/, '').trim();
+    var result = { text: text, series: '', number: 0, name: text };
+    if (/^\d{4}年|^（|^\(/.test(text)) return result;
+    var best = null;
+    MARKS.forEach(function (re, k) {
+      var m = re.exec(text);
+      if (!m) return;
+      // 最后一种写法里，数字前面那个字符还属于系列名
+      var start = k === 4 ? m.index + 1 : m.index;
+      if (start > 0 && (!best || start < best.start)) best = { start: start, end: m.index + m[0].length, number: number(m[1]) };
+    });
+    if (best && best.number > 0) {
+      result.series = text.slice(0, best.start); result.number = best.number; result.name = text.slice(best.end).trim();
+    } else {
+      var space = text.indexOf(' ');
+      if (space >= 2) { result.series = text.slice(0, space); result.name = text.slice(space + 1).trim(); }
+    }
+    result.series = result.series.replace(/[\s—\-–:：]+$/, '').trim();
+    if (result.series.length < 2) { result.series = ''; result.number = 0; result.name = text; }
+    return result;
+  }
+
+  function keyOf(series) { return series.replace(/[《》\s]/g, ''); }
+
+  function minutes(length) {
+    var m = /^(\d+):(\d+):(\d+)$/.exec(String(length || ''));
+    return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : 0;
+  }
+
+  // 某一年播过的全部整期节目，按播出先后。每期只留用得上的几项：[标题, 节目编号, 月日, 配图, 简介]
+  // 往年的不会再变，存一个月；今年的每三小时重新取一次
+  function loadYear(host, year) {
+    if (years[year]) return years[year];
+    var cache = 'bjjt-' + year + '.json';
+    var age = host.cacheAge(cache);
+    if (age >= 0 && age < (year < thisYear() ? 30 * 24 : 3) * 3600 * 1000) {
+      try { var cached = JSON.parse(host.readCache(cache)); if (cached.length > 0) return years[year] = cached; } catch (e) { }
+    }
+    var list = [], seen = {};
+    var base = API + 'NewVideo/getVideoListByColumn?id=' + TOPIC + '&n=100&sort=asc&d=' + year + '&mode=0&serviceId=tvcctv&p=';
+    // 接口最多给 1000 期
+    for (var p = 1; p <= 10; p++) {
+      var json = host.getJson(base + p, options());
+      var page = items(json, 'data.list');
+      page.forEach(function (v) {
+        var guid = str(v, 'guid'), title = str(v, 'title').trim();
+        // 不足五分钟的是混进来的片段
+        if (!guid || seen[guid] || !title || title.charAt(0) === '[' || minutes(str(v, 'length')) < 5) return;
+        seen[guid] = true;
+        list.push([title, guid, str(v, 'time').slice(5, 10).replace('-', ''), str(v, 'image'), str(v, 'brief').replace(/（《百家讲坛》[^）]*）\s*$/, '').replace(/^本期节目主要内容：/, '').slice(0, 160)]);
+      });
+      if (page.length < 100 || p * 100 >= int(json, 'data.total')) break;
+    }
+    if (list.length > 0) host.writeCache(cache, JSON.stringify(list));
+    return years[year] = list;
+  }
+
+  // 把一年的节目归并成系列，按最近播出的排在前面
+  function seriesOf(host, year) {
+    var map = {}, order = [];
+    loadYear(host, year).forEach(function (v) {
+      var t = parseTitle(v[0]), key = t.series ? keyOf(t.series) : OTHER;
+      if (!map[key]) { map[key] = { key: key, title: t.series || (year + ' 年其他节目'), episodes: [] }; order.push(key); }
+      map[key].episodes.push({ number: t.number, name: t.name, text: t.text, guid: v[1], day: v[2], image: v[3], brief: v[4] });
+    });
+    // 只凑出一期的“系列”多半是拆错了，归到其他节目里
+    var result = [], other = map[OTHER] || { key: OTHER, title: year + ' 年其他节目', episodes: [] };
+    order.forEach(function (key) {
+      var s = map[key];
+      if (key === OTHER) return;
+      if (s.episodes.length < 2) { s.episodes.forEach(function (e) { e.number = 0; e.name = e.text; other.episodes.push(e); }); return; }
+      var numbered = s.episodes.every(function (e) { return e.number > 0; });
+      s.numbered = numbered;
+      if (numbered) s.episodes.sort(function (a, b) { return a.number - b.number; });
+      result.push(s);
+    });
+    result.reverse();
+    if (other.episodes.length > 0) result.push(other);
+    return result;
+  }
+
+  function findSeries(host, year, key) {
+    var list = seriesOf(host, year);
+    for (var i = 0; i < list.length; i++) if (list[i].key === key) return list[i];
+    return null;
+  }
+
+  // 一月份从第 2 期往后才开始的，是上一年年底开播的系列，在上一年那本书里能听全，这一年就不重复列了
+  function continued(s) { return s.numbered && s.episodes[0].number > 1 && s.episodes.every(function (e) { return e.day <= '0228'; }); }
+
+  function toBook(year, s) {
+    var first = s.episodes[0];
+    return {
+      coverUrl: first.image, bookUrl: PAGE + '?y=' + year + '&s=' + Shun.enc(s.key), title: s.title,
+      intro: s.key === OTHER ? '这一年里不成系列的单期节目。' : first.brief, status: year + ' 年 · ' + s.episodes.length + ' 讲'
+    };
+  }
+
+  function yearList(host) {
+    var list = [];
+    try {
+      items(host.getJson(API + 'newLanmu/getVideoCalendarByTopicId?id=' + TOPIC + '&mode=2&tt=2&serviceId=tvcctv', options()), 'data.list')
+        .forEach(function (y) { var n = int(y, 'date'); if (n >= FIRST_YEAR) list.push(n); });
+    } catch (e) { if (e.cancelled) throw e; }
+    if (list.length === 0) for (var y = thisYear(); y >= FIRST_YEAR; y--) list.push(y);
+    return list.sort(function (a, b) { return b - a; });
+  }
+
+  registerSource({
+    id: '7c4e1b9d5a2f48e3b6d0a9c3e5f17d28', name: '百家讲坛', url: PAGE,
+    description: 'CCTV-10《百家讲坛》栏目 2009 年以来的全部节目，按系列归并成书，按年份浏览。' +
+      '播放的是节目视频的声音，比普通音频费流量；不能下载到本地。第一次搜索要把各年的节目单取一遍，会慢一些。',
+
+    // 网站没有只搜这个栏目的接口，这里在各年的节目单里找：系列名或者某一期的标题里有关键字的系列
+    search: function (keywords) {
+      var host = this.host, words = String(keywords).trim().toLowerCase().split(/\s+/).filter(function (w) { return w; });
+      var list = yearList(host), books = [];
+      function hit(text) { text = text.toLowerCase(); return words.every(function (w) { return text.indexOf(w) >= 0; }); }
+      try {
+        list.forEach(function (year, i) {
+          if (!years[year]) host.progress((i + 1) + ' / ' + list.length);
+          var found;
+          try { found = seriesOf(host, year); } catch (e) { if (e.cancelled) throw e; host.log('百家讲坛 ' + year + ' 年的节目单没取到：' + e.message); return; }
+          found.forEach(function (s) {
+            if (s.key === OTHER || continued(s)) return;
+            if (hit(s.title) || s.episodes.some(function (e) { return hit(e.name); })) books.push(toBook(year, s));
+          });
+        });
+      } finally { host.progress(null); }
+      return { books: books, totalPage: 1 };
+    },
+
+    categoryMenus: function () {
+      return [{ title: '年份', tabs: yearList(this.host).map(function (y) { return { title: String(y), url: 'bjjt:' + y }; }) }];
+    },
+
+    categoryPage: function (url) {
+      var m = /^bjjt:(\d{4})$/.exec(url);
+      if (!m) throw new Error('不认识的分类地址：' + url);
+      var year = parseInt(m[1], 10);
+      var books = seriesOf(this.host, year).filter(function (s) { return !continued(s); }).map(function (s) { return toBook(year, s); });
+      return { books: books, currentPage: 1, totalPage: 1, nextUrl: null };
+    },
+
+    bookDetail: function (bookUrl) {
+      var host = this.host, m = /[?&]y=(\d{4})&s=([^&#]+)/.exec(bookUrl);
+      if (!m) throw new Error('不认识的地址：' + bookUrl);
+      var year = parseInt(m[1], 10), key = decodeURIComponent(m[2]);
+      var s = findSeries(host, year, key);
+      if (!s) throw new Error('没有找到这个系列，可能网站调整了节目单');
+      var episodes = s.episodes.slice();
+      // 年底开播、跨到下一年的系列，把下一年接着播的那几期接上
+      if (s.numbered && year < thisYear() && episodes.some(function (e) { return e.day >= '1201'; })) {
+        try {
+          var next = findSeries(host, year + 1, key), last = episodes[episodes.length - 1].number;
+          if (next && next.numbered) next.episodes.forEach(function (e) { if (e.number > last && e.day <= '0228') episodes.push(e); });
+        } catch (e) { if (e.cancelled) throw e; }
+      }
+      var book = toBook(year, s);
+      return {
+        title: book.title, coverUrl: book.coverUrl, intro: book.intro, status: year + ' 年 · ' + episodes.length + ' 讲',
+        episodes: episodes.map(function (e) {
+          return { title: s.numbered ? (e.number + ' ' + e.name).trim() : e.name, url: PAGE + '?guid=' + e.guid };
+        })
+      };
+    },
+
+    audio: function (url) { return cntvAudio(this.host, url); }
+  });
+})();
+
+// ---------- 新闻联播（tv.cctv.com/lm/xwlb）：和百家讲坛用的是同一套栏目接口 ----------
+// 两种“书”：某一天的（完整版 + 当天的每一条新闻，各是一集），和某个月的（每天的完整版各是一集，可以连着听）。
+(function () {
+  var PAGE = 'https://tv.cctv.com/lm/xwlb/index.shtml';
+  var TOPIC = 'TOPC1451528971114112';
+  var LIST = 'https://api.cntv.cn/NewVideo/getVideoListByColumn?id=' + TOPIC + '&serviceId=tvcctv';
+  var LOGO = 'https://p3.img.cctvpic.com/photoAlbum/page/performance/img/2019/5/29/1559095198581_853.jpg';
+  var FIRST_YEAR = 2009;
+  var RECENT = 40;   // “最近”一页取 40 期：每天 19 点和 21 点各一期，正好 20 天
+
+  function options() { return { headers: { Referer: PAGE } }; }
+  function two(n) { return (n < 10 ? '0' : '') + n; }
+  function dayUrl(day) { return PAGE + '?d=' + day; }
+  function dayTitle(day) { return '新闻联播 ' + day.slice(0, 4) + '-' + day.slice(4, 6) + '-' + day.slice(6, 8); }
+  function isFull(title) { return title.charAt(0) !== '[' && title.indexOf('新闻联播') >= 0; }
+  function playable(v) { return str(v, 'guid') && str(v, 'length') !== '00:00:00'; }
+
+  // 完整版是哪一天的：标题里写着（“《新闻联播》 20261010 19:00”，早年是“新闻联播 2010-06-04 19：00”），没写就看播出时间
+  function dayOf(v) {
+    var m = /(20\d{2})-?(\d{2})-?(\d{2})/.exec(str(v, 'title')) || /(20\d{2})-(\d{2})-(\d{2})/.exec(str(v, 'time'));
+    return m ? m[1] + m[2] + m[3] : '';
+  }
+  // 19 点的是首播，21 点的是重播。同一天两期都有时只留首播
+  function isRerun(v) { return /21[:：]00/.test(str(v, 'title')) || / 21:/.test(str(v, 'time')); }
+
+  // 一批完整版按天归并，每天留一期，保持原来的先后
+  function byDay(list) {
+    var map = {}, order = [];
+    list.forEach(function (v) {
+      var day = dayOf(v);
+      if (!day || !isFull(str(v, 'title').trim()) || !playable(v)) return;
+      if (!map[day]) { map[day] = v; order.push(day); }
+      else if (isRerun(map[day]) && !isRerun(v)) map[day] = v;
+    });
+    return order.map(function (day) { return { day: day, video: map[day] }; });
+  }
+
+  function dayBook(d) {
+    return { coverUrl: str(d.video, 'image') || LOGO, bookUrl: dayUrl(d.day), title: dayTitle(d.day), intro: str(d.video, 'brief'), status: '完整版 + 单条新闻' };
+  }
+
+  // 关键字是不是一个日期：20240315 / 2024-03-15 / 2024年3月15日 是某一天，202403 / 2024-03 / 2024年3月 是某个月
+  function dateOf(keywords) {
+    var k = String(keywords).trim();
+    var m = /^(20\d{2})(\d{2})(\d{2})?$/.exec(k) || /^(20\d{2})\s*[-\/.年]\s*(\d{1,2})\s*(?:月\s*$|(?:[-\/.月]\s*(\d{1,2})\s*日?)?$)/.exec(k);
+    if (!m) return null;
+    var month = parseInt(m[2], 10), day = m[3] ? parseInt(m[3], 10) : 0;
+    if (month < 1 || month > 12 || day > 31) return null;
+    return { month: m[1] + two(month), day: day ? m[1] + two(month) + two(day) : '' };
+  }
+
+  function monthBook(month) {
+    return {
+      coverUrl: LOGO, bookUrl: PAGE + '?m=' + month, title: '新闻联播 ' + month.slice(0, 4) + ' 年 ' + parseInt(month.slice(4), 10) + ' 月',
+      intro: '这个月每天的《新闻联播》完整版，一天一集。', status: '按月连播'
+    };
+  }
+
+  registerSource({
+    id: 'b3a8f6d1c27e4f95a0d4e8b6c19f3a57', name: '新闻联播', url: PAGE,
+    description: '央视《新闻联播》：可以按天听（完整版和当天的每一条新闻），也可以按月连着听每天的完整版。' +
+      '搜索可以直接输日期（如 20240315、2024年3月），也可以输关键字找提到它的那几天。' +
+      '播放的是节目视频的声音，比普通音频费流量；不能下载到本地。2015 年以前的节目网站上存得不全。',
+
+    search: function (keywords, page) {
+      var date = dateOf(keywords);
+      if (date) return { books: page > 1 ? [] : [date.day ? { coverUrl: LOGO, bookUrl: dayUrl(date.day), title: dayTitle(date.day), intro: '', status: '完整版 + 单条新闻' } : monthBook(date.month)], totalPage: 1 };
+      // 央视网的搜索：搜出来的是一条条新闻，按它是哪一天的归并成那一天的书，简介里列出搜到的几条
+      var host = this.host;
+      var json = host.getJson('https://search.cctv.com/m/if3g_search.php?page=' + page + '&qtext=' + Shun.enc('新闻联播 ' + keywords) +
+        '&type=video&sort=DATE&pageSize=20&channel=', { headers: { Referer: 'https://search.cctv.com/m/search.php?type=video' } });
+      var map = {}, books = [];
+      items(json, 'list').forEach(function (v) {
+        var m = /\/(20\d{2})\/(\d{2})\/(\d{2})\/VIDE/.exec(str(v, 'PAGELINK'));
+        var title = host.htmlDecode(str(v, 'DRETITLE').replace(/<[^>]+>/g, '')).replace(/^\[视频\]/, '').trim();
+        if (!m || !title) return;
+        var day = m[1] + m[2] + m[3];
+        if (!map[day]) { map[day] = { coverUrl: str(v, 'IMAGELINK') || LOGO, bookUrl: dayUrl(day), title: dayTitle(day), intro: '', status: '完整版 + 单条新闻' }; books.push(map[day]); }
+        if (title.indexOf('《新闻联播》') < 0) map[day].intro += (map[day].intro ? '\n' : '') + title;
+      });
+      return { books: books, totalPage: Math.max(page, Math.min(50, Math.ceil(int(json, 'total') / 20))) };
+    },
+
+    categoryMenus: function () {
+      var tabs = [];
+      for (var y = new Date().getFullYear(); y >= FIRST_YEAR; y--) tabs.push({ title: String(y), url: 'xwlb:year:' + y });
+      return [{ title: '按天', tabs: [{ title: '最近', url: 'xwlb:recent:1' }] }, { title: '按月连播', tabs: tabs }];
+    },
+
+    categoryPage: function (url) {
+      var m = /^xwlb:(recent|year):(\d+)$/.exec(url);
+      if (!m) throw new Error('不认识的分类地址：' + url);
+      var n = parseInt(m[2], 10);
+      if (m[1] === 'year') {
+        var now = new Date(), books = [];
+        for (var month = n === now.getFullYear() ? now.getMonth() + 1 : 12; month >= 1; month--) books.push(monthBook(n + two(month)));
+        return { books: books, currentPage: 1, totalPage: 1, nextUrl: null };
+      }
+      var json = this.host.getJson(LIST + '&n=' + RECENT + '&sort=desc&mode=0&p=' + n, options());
+      var list = items(json, 'data.list');
+      var total = list.length === 0 ? n : Math.max(n, Math.ceil(int(json, 'data.total') / RECENT));
+      return { books: byDay(list).map(dayBook), currentPage: n, totalPage: total, nextUrl: n < total ? 'xwlb:recent:' + (n + 1) : null };
+    },
+
+    bookDetail: function (bookUrl) {
+      var host = this.host, m = /[?&]([dm])=(\d{6,8})/.exec(bookUrl);
+      if (!m) throw new Error('不认识的地址：' + bookUrl);
+      var episodes = [], cover = LOGO, intro = '';
+      function episode(title, v) { return { title: title, url: PAGE + '?guid=' + str(v, 'guid') }; }
+      if (m[1] === 'm') {
+        var days = byDay(items(host.getJson(LIST + '&n=100&sort=asc&mode=0&p=1&d=' + m[2], options()), 'data.list'));
+        days.sort(function (a, b) { return a.day < b.day ? -1 : a.day > b.day ? 1 : 0; });
+        days.forEach(function (d) {
+          if (d.day.slice(0, 6) === m[2]) episodes.push(episode(parseInt(d.day.slice(4, 6), 10) + ' 月 ' + parseInt(d.day.slice(6), 10) + ' 日', d.video));
+        });
+        if (episodes.length === 0) throw new Error('网站上没有存这个月的节目');
+        var book = monthBook(m[2]);
+        return { title: book.title, coverUrl: cover, intro: book.intro, status: episodes.length + ' 天', episodes: episodes };
+      }
+      // 某一天的全部视频：完整版（19 点、21 点各一期）和拆开的每一条新闻，按播出顺序
+      var list = items(host.getJson(LIST + '&n=100&sort=asc&mode=2&p=1&d=' + m[2], options()), 'data.list').filter(playable);
+      var full = byDay(list.filter(function (v) { return dayOf(v) === m[2]; }))[0];
+      if (full) { episodes.push(episode('完整版', full.video)); cover = str(full.video, 'image') || LOGO; intro = str(full.video, 'brief'); }
+      var seen = {};
+      list.forEach(function (v) {
+        var title = str(v, 'title').trim();
+        if (isFull(title) || seen[str(v, 'guid')]) return;
+        seen[str(v, 'guid')] = true;
+        episodes.push(episode(title.replace(/^\[视频\]/, '').trim(), v));
+      });
+      if (episodes.length === 0) throw new Error('网站上没有这一天的节目（当天的节目一般晚上八点以后才有）');
+      return { title: dayTitle(m[2]), coverUrl: cover, intro: intro, status: (full ? '完整版 + ' : '') + (episodes.length - (full ? 1 : 0)) + ' 条新闻', episodes: episodes };
+    },
+
+    audio: function (url) { return cntvAudio(this.host, url); }
+  });
+})();

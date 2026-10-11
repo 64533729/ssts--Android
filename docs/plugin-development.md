@@ -5,7 +5,7 @@
 
 > Windows 版的插件是 .NET DLL，安卓上无法加载，所以安卓版改用脚本。接口和 Windows 版的 `SourceBase` 一一对应，移植基本是逐行翻译。
 
-完整示例：[plugins/ShunSources](../plugins/ShunSources)，26 个源，覆盖了本文提到的大部分写法。
+完整示例：[plugins/ShunSources](../plugins/ShunSources)，32 个源，覆盖了本文提到的大部分写法。
 
 ## 1. 插件包结构
 
@@ -205,16 +205,17 @@ at(json, 'data.pageQuery');                  // 任意节点，不存在返回 n
 
 ## 8. 调试
 
-在手机上：“插件”页点开一个源 →“测试”，会依次测试分类、搜索、详情和音频解析；结果和 `host.log` 的输出都在右上角的“日志”里。
-改完脚本后重新打包、重新导入同名插件即可覆盖旧版本。
+- **在电脑上跑**：`./gradlew testDebugUnitTest -Donline=true` 会加载 `plugins/ShunSources`，逐个源测试分类、搜索、详情和音频解析，
+  结果在 `app/build/plugin-report.txt`；加 `-Dsources=哔哩哔哩,酷我畅听` 只跑指定的源。需要 WebView 的音频解析只能在手机上验证。
+- **在手机上**：插件页面点开一个源 →“测试”，结果和 `host.log` 的输出都在“日志”里。
 
 ## 9. 打包
 
-把 `manifest.json` 和脚本压成 zip 即可，用任意压缩软件都行。命令行：
-
 ```bash
-cd plugins/ShunSources && zip -r ../dist/ShunSources.zip . -x '.*'
+./gradlew packPlugins
 ```
+
+会把 `plugins/` 下的每个目录打成 `plugins/dist/<名字>.zip`。也可以直接用任意压缩软件把 `manifest.json` 和脚本压成 zip。
 
 ## 10. 安全提示
 

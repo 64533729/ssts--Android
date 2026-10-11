@@ -4,26 +4,30 @@
 
 ## 下载
 
-- **安卓版和插件包**：[Releases](https://github.com/whykang/ssts--Android/releases)
-- **iOS 版 3.0**（未签名 ipa，插件和安卓通用）：[ssts-ios-3.0-unsigned.ipa](https://github.com/whykang/ssts--Android/raw/main/release/ssts-ios-3.0-unsigned.ipa)
+- **安卓版 4.0**：[ssts-v4.apk](https://github.com/whykang/ssts--Android/releases/download/v4.0/ssts-v4.apk)
+- **插件包 4.0**（32 个源，安卓和 iOS 通用）：[Sources-v4.zip](https://github.com/whykang/ssts--Android/releases/download/v4.0/Sources-v4.zip)
+- **iOS 版 3.0**（未签名 ipa）：[ssts-ios-3.0-unsigned.ipa](https://github.com/whykang/ssts--Android/raw/main/release/ssts-ios-3.0-unsigned.ipa)
+- 历史版本：[Releases](https://github.com/whykang/ssts--Android/releases)
 
 ## 最近更新
 
-**书源（插件包 3.0，共 26 个源）**
+**书源（插件包 4.0，共 32 个源）**
 
-- 新增 7 个源：听友听书、蜻蜓FM、书音FM、央视听音、听书网、29听书网、电台网（广播电台直播）
-- 蜻蜓FM 支持登录，付费节目会标出来
-- 重新下载 [ShunSources.zip](plugins/dist/ShunSources.zip) 导入即可覆盖旧版本
+- 新增 6 个源：百家讲坛、新闻联播、起点有声网、心理FM、网易云播客、网易云音乐（支持登录和“我的歌单”）
+- 评书随身听、相声随身听适配了网站新加的防护验证
+- 下载 [Sources-v4.zip](https://github.com/whykang/ssts--Android/releases/download/v4.0/Sources-v4.zip) 导入即可覆盖旧版本
 
-**程序**
+**程序（安卓 4.0）**
 
-- 网盘新增 115 网盘和 WebDAV（可以连自己的 NAS）；网盘里的书自动显示文件夹里的图片作封面
-- 新增广播电台：内置“云听”，也可以自己添加电台的直播流地址
-- 支持下载到本机离线听
-- 播放页可以调节音量，每本书记住自己的音量
-- 发现页右上角可以在封面网格和列表之间切换
-- 设置页按分类折叠显示
-- 书架上的播放按钮跟随当前的播放状态
+- 桌面小组件：多种尺寸，不打开应用就能播放、暂停、切集
+- 定时关闭改成单独的弹窗：按时长或按集数（集数可自定义），可以设成播放时、锁屏时自动开启
+- 设置里新增“听书统计”：今天、近 7 天、累计听了多久，和每天时长的柱状图
+- 插件页支持自己建分组，分组可以折叠，搜索时可以只搜某个分组；源可以一键置顶
+- 新增“打开应用后自动播放”和“不被其他应用打断”两个开关（默认关闭）
+- 跳过片头片尾挪到了播放页；播放页可以调音量
+- 进入正在播放的书时，章节列表自动定位到当前这一集
+- 自定义电台可以选本地图片当图标
+- 网盘新增 115 网盘
 
 ## 界面预览
 
