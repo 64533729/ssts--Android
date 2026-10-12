@@ -134,3 +134,20 @@ var Shun = (function () {
     }
   };
 })();
+
+/**
+ * “优先用纯音频流”这个默认打开的开关，现在算开还是关。
+ * 用户自己设过的按设的来；没设过的默认开——只有旧版的 iOS / Mac 程序例外：纯音频流的地址里没有能认出格式的扩展名，
+ * 旧版程序下载后打不开，所以在它们上面默认关（在线听不受影响，想开可以手动开）。
+ * strict：这个源的纯音频流旧版 iOS / Mac 程序连在线都放不了（B 站的 .m4s），在它们上面不管怎么设都当成关。
+ */
+Shun.audioOnly = function (host, strict) {
+  var value = String(host.getPref('audioOnly', '') || '');
+  if (value === 'false' || value === '0') return false;
+  if (host.playsAnyDownload) return true;
+  // 旧版程序没有上面那个标记：安卓版的脚本引擎（Rhino）不认识 class，苹果版的认识
+  var oldApple;
+  try { new Function('class A {}'); oldApple = true; } catch (e) { oldApple = false; }
+  if (!oldApple) return true;
+  return !strict && value === 'true';
+};

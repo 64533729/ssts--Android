@@ -4,36 +4,39 @@
 
 ## 下载
 
-- **安卓版 4.0**：[ssts-v4.apk](https://github.com/whykang/ssts--Android/releases/download/v4.0/ssts-v4.apk)
-- **插件包 4.0**（32 个源，安卓和 iOS 通用）：[Sources-v4.zip](https://github.com/whykang/ssts--Android/releases/download/v4.0/Sources-v4.zip)
+- **安卓版 5.0**：[ssts-v5.apk](https://github.com/whykang/ssts--Android/releases/download/v5.0/ssts-v5.apk)
+- **插件包 5.0**（33 个源，安卓和 iOS 通用）：[Sources-v5.zip](https://github.com/whykang/ssts--Android/releases/download/v5.0/Sources-v5.zip)
 - **在线导入插件**：不用下载文件，在“插件”页选择从网址导入，填入下面的地址即可（国内网络可直接访问）
 
   ```
-  https://gitee.com/whykan/ssxz/raw/master/Sources-v4.zip
+  https://gitee.com/whykan/ssxz/raw/master/Sources-v5.zip
   ```
 
-- **iOS 版 4.0**（未签名 ipa，需要 iOS 17 及以上）：[ssts-ios-4.0-unsigned.ipa](https://github.com/whykang/ssts--Android/releases/download/v4.0/ssts-ios-4.0-unsigned.ipa)
+- **iOS 版 5.0**（未签名 ipa，需要 iOS 17 及以上）：[ssts-ios-5.0-unsigned.ipa](https://github.com/whykang/ssts--Android/releases/download/v5.0/ssts-ios-5.0-unsigned.ipa)
 - 历史版本：[Releases](https://github.com/whykang/ssts--Android/releases)
 
 ## 最近更新
 
-**书源（插件包 4.0，共 32 个源）**
+**书源（插件包 5.0，共 33 个源）**
 
-- 新增 6 个源：百家讲坛、新闻联播、起点有声网、心理FM、网易云播客、网易云音乐（支持登录和“我的歌单”）
-- 评书随身听、相声随身听适配了网站新加的防护验证
-- 下载 [Sources-v4.zip](https://github.com/whykang/ssts--Android/releases/download/v4.0/Sources-v4.zip) 导入即可覆盖旧版本
+- 新增抖音：搜索视频和用户，听作品的声音，能听关注的人的直播（需要登录）
+- 哔哩哔哩支持登录：发现页的“我的”里能看到自己的收藏夹和订阅的合集
+- 哔哩哔哩、抖音：打开属于合集的视频时，自动列出整个合集，可以一集一集接着听（源的设置里可以关）
+- 哔哩哔哩、抖音：默认只取声音那一路，更省流量（源的设置里可以关）
+- 下载 [Sources-v5.zip](https://github.com/whykang/ssts--Android/releases/download/v5.0/Sources-v5.zip) 导入即可覆盖旧版本；旧版程序也能用，但哔哩哔哩的纯音频在 iOS 上需要 5.0 的程序
 
-**程序（安卓、iOS 4.0）**
+**程序（安卓、iOS 5.0）**
 
-- 桌面小组件（仅安卓）：多种尺寸，不打开应用就能播放、暂停、切集
-- 定时关闭改成单独的弹窗：按时长或按集数（集数可自定义），可以设成播放时、锁屏时自动开启
-- 设置里新增“听书统计”：今天、近 7 天、累计听了多久，和每天时长的柱状图
-- 插件页支持自己建分组，分组可以折叠，搜索时可以只搜某个分组；源可以一键置顶
-- 新增“打开应用后自动播放”开关；安卓另有“不被其他应用打断”开关（都默认关闭）
-- 跳过片头片尾挪到了播放页；播放页可以调音量
-- 进入正在播放的书时，章节列表自动定位到当前这一集
-- 自定义电台可以选本地图片当图标
-- 网盘新增 115 网盘
+- 章节多的书可以分段查看：详情页按每 50 集分一段（全部、1-50、51-100……），点哪一段看哪一段
+- 按区间下载：长按某一段下载这一段，或者在菜单里填“从第几集到第几集”
+- 发现页可以只在当前这个源里搜索；需要人机验证的源可以直接去验证，没登录的源可以直接去登录
+- 设置里可以调整底部标签的顺序，排第一个的是打开应用时先显示的
+- 设置里新增“播放通道”：音乐（默认，导航播报等响起时压低音量接着播）或人声（这时暂停）
+- 安卓：在最外层返回时要连着两次才退出，避免误触（设置里可以关）
+- 安卓：修复有的手机上一开始播放就被自己的通知提示音打断
+- 安卓：修复百家讲坛、新闻联播这类节目重新打开后从头播放
+- iOS：修复有的下载文件播放时提示“无法打开”
+- 修复发现页听书源名字太长时切换箭头不显示
 
 ## 界面预览
 

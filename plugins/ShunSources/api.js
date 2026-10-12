@@ -1,13 +1,82 @@
 // ---------- 哔哩哔哩：搜索视频，按分 P 作为章节，播放 HTML5 版 mp4 的音轨 ----------
+// 登录（在 App 内的网页里登录，留下 Cookie）后，发现页的“我的”里有自己的收藏夹和订阅的合集：
+// 自己的每个收藏夹是一个标签，里面的视频各是一本书；订阅的合集、收藏的别人的收藏夹各是一本书，里面的视频是章节。
 (function () {
   var API = 'https://api.bilibili.com/x/';
+  var SITE = 'https://www.bilibili.com';
+  var LOGIN_HINT = '还没有登录 B 站：到“插件”页点开这个源，点“登录”';
   var cookie = null; // B 站接口需要一个 buvid3 Cookie（随机生成即可）
 
+  // 登录后网页留下的 Cookie（旧版宿主没有这个接口，当作没登录）
+  function jar(host) { return typeof host.cookies === 'function' ? String(host.cookies('https://api.bilibili.com/') || '') : ''; }
+  function cookieValue(text, name) { return (new RegExp('(?:^|;\\s*)' + name + '=([^;]*)').exec(text) || [])[1] || ''; }
+
+  // 请求带上登录的 Cookie；里面没有 buvid3 时补一个随机的
+  function options(host) {
+    var saved = jar(host);
+    if (!cookieValue(saved, 'buvid3')) {
+      if (!cookie) cookie = 'buvid3=' + host.uuid().toUpperCase() + 'infoc';
+      saved = saved ? saved + '; ' + cookie : cookie;
+    }
+    return { desktop: true, headers: { Cookie: saved, Referer: SITE + '/' } };
+  }
+
   function get(host, url) {
-    if (!cookie) cookie = 'buvid3=' + host.uuid().toUpperCase() + 'infoc';
-    var json = host.getJson(url, { desktop: true, headers: { Cookie: cookie, Referer: 'https://www.bilibili.com/' } });
+    var json = host.getJson(url, options(host));
+    if (int(json, 'code') === -101) throw new Error(LOGIN_HINT);
     if (int(json, 'code') !== 0) throw new Error('B 站接口返回错误：' + str(json, 'message') + '（' + str(json, 'code') + '）');
     return json.data;
+  }
+
+  // 登录的是哪个账号（用户编号）；没登录时是空的
+  function myId(host) {
+    var saved = jar(host);
+    return cookieValue(saved, 'SESSDATA') ? cookieValue(saved, 'DedeUserID') : '';
+  }
+
+  function duration(seconds) {
+    var m = Math.floor(seconds / 60), s = seconds % 60;
+    return (m >= 60 ? Math.floor(m / 60) + ':' + (m % 60 < 10 ? '0' : '') + m % 60 : m) + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  function folderUrl(id) { return SITE + '/list/ml' + id; }
+  function seasonUrl(mid, id) { return 'https://space.bilibili.com/' + mid + '/lists/' + id + '?type=season'; }
+  // 收藏夹、合集里的一个视频。删掉或者失效的视频标题会变成“已失效视频”，没法播，不要
+  function usable(v) { return str(v, 'bvid') && str(v, 'title') !== '已失效视频'; }
+
+  // 收藏夹或合集当成一本书时的章节：一个视频一集（多 P 的视频只播第一 P）。两种列表都是分页的，一页 20 个
+  function listEpisodes(host, url) {
+    var episodes = [], seen = {};
+    try {
+      for (var p = 1; p <= 100; p++) {
+        var data;
+        try { data = get(host, url + '&pn=' + p + '&ps=20'); } catch (e) {
+          // 后面某一页没取到（翻得快了 B 站会说“服务暂不可用”）：再试一次，还不行就先用已经取到的
+          if (e.cancelled || p === 1) throw e;
+          try { data = get(host, url + '&pn=' + p + '&ps=20'); } catch (again) {
+            if (again.cancelled) throw again;
+            host.log('B 站列表第 ' + p + ' 页没取到，只显示前面的 ' + episodes.length + ' 个：' + again.message);
+            break;
+          }
+        }
+        var list = items(data, 'medias'), total = int(data, 'info.media_count'), fresh = 0;
+        list.forEach(function (v) {
+          var bvid = str(v, 'bvid');
+          if (!usable(v) || seen[bvid]) return;
+          seen[bvid] = true; fresh++;
+          episodes.push({ title: str(v, 'title'), url: 'bili-bv:' + bvid });
+        });
+        // 合集的接口有时一次就把全部给了，再翻页只会重复：没有新的就停
+        if (list.length === 0 || fresh === 0 || data.has_more === false || p * 20 >= total) break;
+        host.progress((p + 1) + ' / ' + Math.ceil(total / 20));
+      }
+    } finally { host.progress(null); }
+    return episodes;
+  }
+
+  function listBook(host, url) {
+    var data = get(host, url + '&pn=1&ps=1'), info = at(data, 'info') || {};
+    return { title: str(info, 'title'), coverUrl: https(str(info, 'cover')), artist: str(info, 'upper.name'), intro: str(info, 'intro') };
   }
 
   function https(u) { return u.indexOf('//') === 0 ? 'https:' + u : u; }
@@ -27,7 +96,22 @@
 
   registerSource({
     id: 'c893546d95f84db194046bd8de5dbcbb', name: '哔哩哔哩', url: 'https://m.bilibili.com',
-    description: '推荐指数:5星 ⭐⭐⭐⭐⭐\nB 站有很多意想不到的有声书。播放的是视频的声音，多 P 视频每一 P 为一集。',
+    description: '推荐指数:5星 ⭐⭐⭐⭐⭐\nB 站有很多意想不到的有声书。播放的是视频的声音，多 P 视频每一 P 为一集，属于合集的视频会列出整个合集。' +
+      '在插件页“登录”自己的账号后，发现页的“我的”里能看到自己的收藏夹和订阅的合集。',
+    config: [
+      // 默认值写成字符串：旧版的 iOS / Mac 程序会把布尔的 true 读成 "1"，开关显示成关着的，实际却是开的
+      { type: 'switch', key: 'autoSeason', label: '视频属于合集时，自动显示整个合集', default: 'true' },
+      { type: 'switch', key: 'audioOnly', label: '优先用纯音频流（更省流量，放不了就关掉）', default: 'true' }
+    ],
+    // 手机上给手机版的登录页（短信 / 密码）；右上角可以换成电脑版网页（能扫码）
+    loginUrl: 'https://passport.bilibili.com/login?gourl=' + encodeURIComponent('https://m.bilibili.com/'), loginDesktop: false,
+    loginAltUrl: 'https://passport.bilibili.com/login',
+    // 已登录时返回昵称
+    checkLogin: function () {
+      var name = str(get(this.host, API + 'web-interface/nav'), 'uname');
+      if (!name) throw new Error('还没有登录 B 站');
+      return name;
+    },
     coverHeaders: Shun.coverReferer('hdslb.com', 'https://www.bilibili.com/'),
 
     search: function (keywords, page) { return search(this.host, keywords, page); },
@@ -36,19 +120,96 @@
     categoryMenus: function () {
       var words = [['有声小说', '有声小说'], ['广播剧', '广播剧'], ['评书', '评书'], ['相声', '相声'], ['有声漫画', '有声漫画'],
         ['英文有声书', 'audiobooks'], ['经典老歌', '经典老歌'], ['音乐推荐', '音乐推荐'], ['同人音声', '同人音声']];
-      return [{ title: '推荐', tabs: words.map(function (w) { return { title: w[0], url: 'bili-search:' + w[1] + '#1' }; }) }];
+      var menus = [{ title: '推荐', tabs: words.map(function (w) { return { title: w[0], url: 'bili-search:' + w[1] + '#1' }; }) }];
+      // “我的”：登录后自己的每个收藏夹是一个标签，最后是订阅的合集；没登录时放两个提示登录的标签
+      var host = this.host, mid = myId(host), mine = [];
+      if (mid) {
+        try {
+          items(get(host, API + 'v3/fav/folder/created/list-all?up_mid=' + mid), 'list').forEach(function (f) {
+            mine.push({ title: str(f, 'title') + '（' + int(f, 'media_count') + '）', url: 'bili-fav:' + str(f, 'id') + '#1' });
+          });
+        } catch (e) { if (e.cancelled) throw e; host.log('B 站收藏夹没取到：' + e.message); }
+      }
+      if (mine.length === 0) mine.push({ title: '收藏夹', url: 'bili-my:fav#1' });
+      mine.push({ title: '订阅合集', url: 'bili-my:sub#1' });
+      menus.push({ title: '我的', tabs: mine });
+      return menus;
     },
 
     categoryPage: function (url) {
+      var host = this.host, mine = /^bili-(fav|my):([^#]+)#(\d+)$/.exec(url);
+      if (mine) {
+        var n = parseInt(mine[3], 10), mid = myId(host);
+        if (!mid) throw new Error(LOGIN_HINT);
+        if (mine[1] === 'fav') {
+          // 某个收藏夹里的视频，每个视频是一本书
+          var fav = get(host, API + 'v3/fav/resource/list?media_id=' + mine[2] + '&platform=web&pn=' + n + '&ps=20');
+          var videos = items(fav, 'medias').filter(usable).map(function (v) {
+            return {
+              coverUrl: https(str(v, 'cover')), bookUrl: 'https://m.bilibili.com/video/' + str(v, 'bvid'), title: str(v, 'title'), artist: str(v, 'upper.name'),
+              status: (int(v, 'page') > 1 ? int(v, 'page') + ' P · ' : '') + duration(int(v, 'duration')), intro: str(v, 'intro')
+            };
+          });
+          var more = fav.has_more === true;
+          return { books: videos, currentPage: n, totalPage: more ? n + 1 : n, nextUrl: more ? 'bili-fav:' + mine[2] + '#' + (n + 1) : null };
+        }
+        if (mine[2] === 'fav') throw new Error('没有取到收藏夹，点右上角刷新再试一次');
+        // 订阅的合集（type 21）和收藏的别人的收藏夹（type 11），各是一本书
+        var sub = get(host, API + 'v3/fav/folder/collected/list?up_mid=' + mid + '&platform=web&pn=' + n + '&ps=20');
+        var lists = items(sub, 'list').filter(function (f) { return int(f, 'state') !== 1; }).map(function (f) {
+          var season = int(f, 'type') === 21;
+          return {
+            coverUrl: https(str(f, 'cover')), bookUrl: season ? seasonUrl(str(f, 'mid'), str(f, 'id')) : folderUrl(str(f, 'id')), title: str(f, 'title'),
+            artist: str(f, 'upper.name'), status: (season ? '合集' : '收藏夹') + ' · ' + int(f, 'media_count') + ' 个视频', intro: str(f, 'intro')
+          };
+        });
+        var moreLists = sub.has_more === true;
+        return { books: lists, currentPage: n, totalPage: moreLists ? n + 1 : n, nextUrl: moreLists ? 'bili-my:sub#' + (n + 1) : null };
+      }
       var m = /^bili-search:(.+)#(\d+)$/.exec(url);
       var page = parseInt(m[2], 10);
       var r = search(this.host, m[1], page);
       return { books: r.books, currentPage: page, totalPage: r.totalPage, nextUrl: page < r.totalPage ? 'bili-search:' + m[1] + '#' + (page + 1) : null };
     },
 
-    bookDetail: function (bookUrl) {
+    bookDetail: function (bookUrl, loadEpisodes) {
+      // 收藏夹、合集当成一本书：里面的视频是章节
+      var folder = /\/list\/ml(\d+)/.exec(bookUrl), season = /\/lists\/(\d+)\?type=season/.exec(bookUrl);
+      if (folder || season) {
+        var listUrl = folder ? API + 'v3/fav/resource/list?media_id=' + folder[1] + '&platform=web' : API + 'space/fav/season/list?season_id=' + season[1];
+        var book = listBook(this.host, listUrl);
+        book.episodes = loadEpisodes === false ? [] : listEpisodes(this.host, listUrl);
+        book.status = book.episodes.length > 0 ? book.episodes.length + ' 个视频' : '';
+        return book;
+      }
       var bvid = bookUrl.replace(/\/+$/, '').split('/').pop().split('?')[0];
       var data = get(this.host, API + 'web-interface/view?bvid=' + bvid);
+      // 这个视频属于某个合集：直接把整个合集列出来，一集一集接着听（视频信息里已经带着合集的全部内容，不用再请求）
+      var seasonEpisodes = [];
+      // 存成 "1" / "0" 的是旧版程序在开关显示为“关”时存下的，也当成关
+      var autoSeason = String(this.host.getPref('autoSeason', 'true'));
+      if (at(data, 'ugc_season') && autoSeason !== 'false' && autoSeason !== '1' && autoSeason !== '0') {
+        items(data, 'ugc_season.sections').forEach(function (section) {
+          items(section, 'episodes').forEach(function (e) {
+            var parts = items(e, 'pages'), name = str(e, 'title') || str(e, 'arc.title');
+            // 合集里的视频自己又分了 P 的，每一 P 一集
+            if (parts.length > 1) {
+              parts.forEach(function (p) {
+                seasonEpisodes.push({ title: name + ' · ' + (str(p, 'part') || 'P' + int(p, 'page')), url: 'bili:' + str(e, 'aid') + ':' + str(p, 'cid') });
+              });
+            } else if (str(e, 'aid') && str(e, 'cid')) {
+              seasonEpisodes.push({ title: name, url: 'bili:' + str(e, 'aid') + ':' + str(e, 'cid') });
+            }
+          });
+        });
+      }
+      if (seasonEpisodes.length > 1) {
+        return {
+          episodes: seasonEpisodes, title: str(data, 'ugc_season.title') || str(data, 'title'), artist: str(data, 'owner.name'),
+          intro: str(data, 'ugc_season.intro') || str(data, 'desc'), coverUrl: https(str(data, 'ugc_season.cover') || str(data, 'pic')),
+          status: '合集 · 共 ' + seasonEpisodes.length + ' 集'
+        };
+      }
       var pages = items(data, 'pages');
       var episodes = pages.map(function (p) {
         var part = str(p, 'part');
@@ -60,7 +221,35 @@
     // 播放地址带时效签名，每次播放时现取
     audio: function (url) {
       var parts = url.split(':');
+      if (parts.length === 2 && parts[0] === 'bili-bv') {
+        // 收藏夹、合集里的视频只记了视频编号，播的时候再查它的第一 P
+        var video = get(this.host, API + 'web-interface/view?bvid=' + parts[1]);
+        parts = ['bili', str(video, 'aid'), str(video, 'pages.0.cid') || str(video, 'cid')];
+      }
       if (parts.length !== 3 || parts[0] !== 'bili') throw new Error('章节地址已过期，请刷新章节列表');
+      // 优先只取声音：B 站把画面和声音分开存，声音那一路很小。没取到（比如老视频没有分开存）就还是用带画面的
+      if (Shun.audioOnly(this.host, true)) {
+        try {
+          var dash = get(this.host, API + 'player/playurl?avid=' + parts[1] + '&cid=' + parts[2] + '&fnval=16&fourk=0&otype=json');
+          var track = null;
+          items(dash, 'dash.audio').forEach(function (a) { if (!track || int(a, 'bandwidth') < int(track, 'bandwidth')) track = a; });
+          if (track) {
+            // 几个地址里优先用 B 站自己的服务器（bilivideo.com），别的是借用户设备转发的，不稳
+            var urls = [str(track, 'baseUrl') || str(track, 'base_url')].concat(items(track, 'backupUrl')).concat(items(track, 'backup_url'))
+              .filter(function (u) { return u; });
+            var own = urls.filter(function (u) { return /^https?:\/\/[^\/]*\.bilivideo\.com[:\/]/.test(u) && !/mcdn/.test(u); });
+            // 这一路地址不带来源页（Referer）会被拒绝，连播放前的探测也要带，所以直接跟着地址一起给；
+            // 以及电脑浏览器的身份（UA）：这个地址是按电脑网页要的，换成安卓手机的 UA 去取会被拒绝
+            var ua = typeof this.host.userAgent === 'function' ? String(this.host.userAgent(true) || '') : '';
+            if (own[0] || urls[0]) {
+              return { url: own[0] || urls[0], headers: { Referer: SITE + '/', 'User-Agent': ua || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36' } };
+            }
+          }
+        } catch (e) {
+          if (e.cancelled) throw e;
+          this.host.log('B 站纯音频流没取到，改用带画面的：' + e.message);
+        }
+      }
       var data = get(this.host, API + 'player/playurl?avid=' + parts[1] + '&cid=' + parts[2] + '&platform=html5&otype=json&qn=16&type=mp4&html5=1');
       var audio = str(data, 'durl.0.url');
       if (!audio) throw new Error('没有获取到播放地址（可能是大会员或付费内容）');
