@@ -91,11 +91,39 @@ var Shun = (function () {
 
     /** 播放前确认音频服务器放行；被人机验证拦住（403）时先去网站首页过一次验证。返回音频地址和要带的请求头 */
     cfAudio: function (host, audioUrl, site) {
-      var o = Shun.cfOptions(host, { Referer: site, Range: 'bytes=0-1' });
-      var status = 0;
-      try { status = host.status(audioUrl, o); } catch (e) { if (e.cancelled) throw e; }
-      if (status === 403 || status === 503) Shun.cfPass(host, site);
-      return { url: audioUrl, headers: Shun.cfOptions(host, { Referer: site }).headers };
+      function check() {
+        try { return host.status(audioUrl, Shun.cfOptions(host, { Referer: site, Range: 'bytes=0-1' })); } catch (e) { if (e.cancelled) throw e; return 0; }
+      }
+      var status = check();
+      if (status === 403 || status === 503) {
+        try { Shun.cfPass(host, site); } catch (e) { if (e.cancelled) throw e; }
+        status = check();
+      }
+      if (status === 403 || status === 503) {
+        // 音频放在另一个子域名上，它的验证有时是单独的：把它的首页也打开过一次验证
+        var root = /^https?:\/\/[^\/]+/.exec(audioUrl);
+        if (root) {
+          try {
+            host.render(root[0] + '/', {
+              desktop: false, nativeUA: true, timeout: 40000,
+              // 验证页的标题是 “Just a moment...” / “请稍候…”；过了验证后这个地址多半只是一个很短的出错页，所以不看长度
+              parse: function (html) { return html.length > 200 && html.indexOf('Just a moment') < 0 && html.indexOf('请稍候') < 0 ? 'ok' : ''; }
+            });
+          } catch (e) {
+            if (e.cancelled) throw e;
+            host.log('音频服务器的人机验证没有自动通过：' + e.message);
+          }
+        }
+      }
+      return { url: audioUrl, headers: Shun.cfHeaders(host, audioUrl, site) };
+    },
+    // 取音频时要带的请求头：来源页、验证时用的那个 UA，还有验证通过后留下的 Cookie。
+    // Cookie 要自己写进去：安卓的播放器和下载不会自动带上网页里的 Cookie，不带就会被拒绝（403）
+    cfHeaders: function (host, audioUrl, site) {
+      var headers = Shun.cfOptions(host, { Referer: site }).headers;
+      var cookie = typeof host.cookies === 'function' ? String(host.cookies(audioUrl) || '') : '';
+      if (cookie) headers.Cookie = cookie;
+      return headers;
     },
 
     getDoc: function (host, url, desktop, referer, encoding) {

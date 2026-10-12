@@ -109,7 +109,7 @@
     // 并且带上 Referer 和验证时用的那个 UA
     audio: function (url) { return Shun.cfAudio(this.host, url, SITE); },
 
-    audioHeaders: function (audioUrl) { return audioUrl.indexOf('psmp3.com') >= 0 ? Shun.cfOptions(this.host, { Referer: SITE }).headers : null; }
+    audioHeaders: function (audioUrl) { return audioUrl.indexOf('psmp3.com') >= 0 ? Shun.cfHeaders(this.host, audioUrl, SITE) : null; }
   });
 })();
 
@@ -265,6 +265,6 @@
     // 并且带上 Referer 和验证时用的那个 UA
     audio: function (url) { return Shun.cfAudio(this.host, url, SITE); },
 
-    audioHeaders: function (audioUrl) { return audioUrl.indexOf('xsmp3.com') >= 0 ? Shun.cfOptions(this.host, { Referer: SITE }).headers : null; }
+    audioHeaders: function (audioUrl) { return audioUrl.indexOf('xsmp3.com') >= 0 ? Shun.cfHeaders(this.host, audioUrl, SITE) : null; }
   });
 })();

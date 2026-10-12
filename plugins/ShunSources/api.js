@@ -64,7 +64,7 @@
           var bvid = str(v, 'bvid');
           if (!usable(v) || seen[bvid]) return;
           seen[bvid] = true; fresh++;
-          episodes.push({ title: str(v, 'title'), url: 'bili-bv:' + bvid });
+          episodes.push({ title: str(v, 'title'), url: 'bili-bv:' + bvid, parts: int(v, 'page', 1) });
         });
         // 合集的接口有时一次就把全部给了，再翻页只会重复：没有新的就停
         if (list.length === 0 || fresh === 0 || data.has_more === false || p * 20 >= total) break;
@@ -74,9 +74,33 @@
     return episodes;
   }
 
+  // 一个视频的信息里带着它所在合集的全部内容：合集里每个视频、每个视频的每一 P。每一 P 是一集
+  function seasonParts(video) {
+    var episodes = [];
+    items(video, 'ugc_season.sections').forEach(function (section) {
+      items(section, 'episodes').forEach(function (e) {
+        var parts = items(e, 'pages'), name = str(e, 'title') || str(e, 'arc.title');
+        // 合集里的视频自己又分了 P 的，每一 P 一集
+        if (parts.length > 1) {
+          parts.forEach(function (p) {
+            episodes.push({ title: name + ' · ' + (str(p, 'part') || 'P' + int(p, 'page')), url: 'bili:' + str(e, 'aid') + ':' + str(p, 'cid') });
+          });
+        } else if (str(e, 'aid') && str(e, 'cid')) {
+          episodes.push({ title: name, url: 'bili:' + str(e, 'aid') + ':' + str(e, 'cid') });
+        }
+      });
+    });
+    return episodes;
+  }
+
+  // 收藏夹里分了好几 P 的视频：列表里只知道它有几 P，要再查一次才知道每一 P。一个收藏夹里这样的视频最多查这么多个，免得太慢
+  var MAX_EXPAND = 40;
+
   function listBook(host, url) {
     var data = get(host, url + '&pn=1&ps=1'), info = at(data, 'info') || {};
-    return { title: str(info, 'title'), coverUrl: https(str(info, 'cover')), artist: str(info, 'upper.name'), intro: str(info, 'intro') };
+    // firstVideo：列表里的第一个视频，取合集的分 P 时用
+    return { title: str(info, 'title'), coverUrl: https(str(info, 'cover')), artist: str(info, 'upper.name'), intro: str(info, 'intro'),
+      firstVideo: str(data, 'medias.0.bvid'), count: int(info, 'media_count') };
   }
 
   function https(u) { return u.indexOf('//') === 0 ? 'https:' + u : u; }
@@ -178,31 +202,64 @@
       if (folder || season) {
         var listUrl = folder ? API + 'v3/fav/resource/list?media_id=' + folder[1] + '&platform=web' : API + 'space/fav/season/list?season_id=' + season[1];
         var book = listBook(this.host, listUrl);
-        book.episodes = loadEpisodes === false ? [] : listEpisodes(this.host, listUrl);
-        book.status = book.episodes.length > 0 ? book.episodes.length + ' 个视频' : '';
-        return book;
+        var host = this.host, listed = null, videos = book.count;
+        if (loadEpisodes === false) listed = [];
+        if (listed === null && season && book.firstVideo) {
+          // 合集：合集里任意一个视频的信息都带着整个合集（每个视频、每一 P），一次就能拿全，不用一页页翻列表；
+          // 翻列表的话，分了好几 P 的视频也只会剩第一 P
+          try {
+            var first = get(host, API + 'web-interface/view?bvid=' + book.firstVideo);
+            var full = str(first, 'ugc_season.id') === season[1] ? seasonParts(first) : [];
+            if (full.length > 0) {
+              listed = full;
+              videos = int(first, 'ugc_season.ep_count') || videos;
+            }
+          } catch (e) {
+            if (e.cancelled) throw e;
+            host.log('B 站合集的分 P 没取到，改为翻列表（每个视频只列第一 P）：' + e.message);
+          }
+        }
+        if (listed === null) {
+          listed = listEpisodes(host, listUrl);
+          videos = listed.length;
+        }
+        if (folder) {
+          // 收藏夹：分了好几 P 的视频逐个查出每一 P
+          var expanded = [], budget = MAX_EXPAND;
+          try {
+            listed.forEach(function (v, i) {
+              if (v.parts > 1 && budget > 0) {
+                budget--;
+                host.progress('分 P ' + (MAX_EXPAND - budget));
+                try {
+                  var video = get(host, API + 'web-interface/view?bvid=' + v.url.split(':')[1]), pages = items(video, 'pages');
+                  if (pages.length > 1) {
+                    pages.forEach(function (p) {
+                      expanded.push({ title: v.title + ' · ' + (str(p, 'part') || 'P' + int(p, 'page')), url: 'bili:' + str(video, 'aid') + ':' + str(p, 'cid') });
+                    });
+                    return;
+                  }
+                } catch (e) {
+                  if (e.cancelled) throw e;
+                }
+              }
+              expanded.push(v);
+            });
+          } finally { host.progress(null); }
+          listed = expanded;
+        }
+        return {
+          title: book.title, coverUrl: book.coverUrl, artist: book.artist, intro: book.intro,
+          episodes: listed.map(function (e) { return { title: e.title, url: e.url }; }),
+          status: listed.length > 0 ? videos + ' 个视频' + (listed.length > videos ? ' · ' + listed.length + ' 集' : '') : ''
+        };
       }
       var bvid = bookUrl.replace(/\/+$/, '').split('/').pop().split('?')[0];
       var data = get(this.host, API + 'web-interface/view?bvid=' + bvid);
       // 这个视频属于某个合集：直接把整个合集列出来，一集一集接着听（视频信息里已经带着合集的全部内容，不用再请求）
-      var seasonEpisodes = [];
       // 存成 "1" / "0" 的是旧版程序在开关显示为“关”时存下的，也当成关
       var autoSeason = String(this.host.getPref('autoSeason', 'true'));
-      if (at(data, 'ugc_season') && autoSeason !== 'false' && autoSeason !== '1' && autoSeason !== '0') {
-        items(data, 'ugc_season.sections').forEach(function (section) {
-          items(section, 'episodes').forEach(function (e) {
-            var parts = items(e, 'pages'), name = str(e, 'title') || str(e, 'arc.title');
-            // 合集里的视频自己又分了 P 的，每一 P 一集
-            if (parts.length > 1) {
-              parts.forEach(function (p) {
-                seasonEpisodes.push({ title: name + ' · ' + (str(p, 'part') || 'P' + int(p, 'page')), url: 'bili:' + str(e, 'aid') + ':' + str(p, 'cid') });
-              });
-            } else if (str(e, 'aid') && str(e, 'cid')) {
-              seasonEpisodes.push({ title: name, url: 'bili:' + str(e, 'aid') + ':' + str(e, 'cid') });
-            }
-          });
-        });
-      }
+      var seasonEpisodes = at(data, 'ugc_season') && autoSeason !== 'false' && autoSeason !== '1' && autoSeason !== '0' ? seasonParts(data) : [];
       if (seasonEpisodes.length > 1) {
         return {
           episodes: seasonEpisodes, title: str(data, 'ugc_season.title') || str(data, 'title'), artist: str(data, 'owner.name'),

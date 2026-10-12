@@ -5,11 +5,11 @@
 ## 下载
 
 - **安卓版 5.0**：[ssts-v5.apk](https://github.com/whykang/ssts--Android/releases/download/v5.0/ssts-v5.apk)
-- **插件包 5.1**（33 个源，安卓和 iOS 通用）：[Sources-v5.1.zip](https://github.com/whykang/ssts--Android/releases/download/v5.0/Sources-v5.1.zip)
+- **插件包 5.2**（33 个源，安卓和 iOS 通用）：[Sources-v5.2.zip](https://github.com/whykang/ssts--Android/releases/download/v5.0/Sources-v5.2.zip)
 - **在线导入插件**：不用下载文件，在“插件”页选择从网址导入，填入下面的地址即可（国内网络可直接访问）
 
   ```
-  https://gitee.com/whykan/ssxz/raw/master/Sources-v5.1.zip
+  https://gitee.com/whykan/ssxz/raw/master/Sources-v5.2.zip
   ```
 
 - **iOS 版 5.0**（未签名 ipa，需要 iOS 17 及以上）：[ssts-ios-5.0-unsigned.ipa](https://github.com/whykang/ssts--Android/releases/download/v5.0/ssts-ios-5.0-unsigned.ipa)
@@ -17,14 +17,16 @@
 
 ## 最近更新
 
-**书源（插件包 5.1，共 33 个源）**
+**书源（插件包 5.2，共 33 个源）**
 
+- 5.2 哔哩哔哩：订阅的合集里，分成好几段的视频现在每一段都会列出来，不再只有第一段（感谢 [@gyz1023](https://github.com/whykang/ssts--Android/issues/17) 的反馈）
+- 5.2 相声随身听、评书随身听：处理安卓上播放时提示 403
 - 5.1 修复喜马拉雅：有些专辑明明能听却提示“已下架”；搜索时名字差一两个字就搜不到（感谢 [@Anyusheng160](https://github.com/whykang/ssts--Android/issues/16) 的反馈）
 - 新增抖音：搜索视频和用户，听作品的声音，能听关注的人的直播（需要登录）
 - 哔哩哔哩支持登录：发现页的“我的”里能看到自己的收藏夹和订阅的合集
 - 哔哩哔哩、抖音：打开属于合集的视频时，自动列出整个合集，可以一集一集接着听（源的设置里可以关）
 - 哔哩哔哩、抖音：默认只取声音那一路，更省流量（源的设置里可以关）
-- 下载 [Sources-v5.1.zip](https://github.com/whykang/ssts--Android/releases/download/v5.0/Sources-v5.1.zip) 导入即可覆盖旧版本；旧版程序也能用，但哔哩哔哩的纯音频在 iOS 上需要 5.0 的程序
+- 下载 [Sources-v5.2.zip](https://github.com/whykang/ssts--Android/releases/download/v5.0/Sources-v5.2.zip) 导入即可覆盖旧版本；旧版程序也能用，但哔哩哔哩的纯音频在 iOS 上需要 5.0 的程序
 
 **程序（安卓、iOS 5.0）**
 
