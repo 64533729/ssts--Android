@@ -20,6 +20,11 @@
     return u.split('!')[0] + '!op_type=3&columns=290&rows=290';
   }
 
+  // 登录后网页留下的 Cookie 里有 1&_token（旧版宿主没有读 Cookie 的接口，当作没登录）
+  function loggedIn(host) {
+    return typeof host.cookies === 'function' && /(^|;\s*)1&_token=/.test(String(host.cookies(WEB + '/') || ''));
+  }
+
   function albumUrl(id) { return WEB + '/album/' + id; }
   function albumId(url) { return (/album\/(\d+)/.exec(url) || [])[1] || ''; }
   function finished(v) { return String(v) === '2' ? '完结' : '连载'; }
@@ -37,17 +42,58 @@
       return str(json, 'data.nickname') || str(json, 'data.nickName') || true;
     },
 
+    // 搜索有两条路：
+    // 1. 登录了的先用网页版的搜索，结果和在网站上搜的一样（没登录时网页版的搜索会被风控拦住，所以只在登录后用）；
+    // 2. 老接口（旧版客户端用的）：不用登录，但匹配很死板，名字差一个字就搜不到。第一页结果太少时，把关键字从后面去掉几个字再搜，补到后面。
     search: function (keywords, page) {
-      var r = this.host.getJson('https://search.ximalaya.com/front/v1?core=album&kw=' + encodeURIComponent(keywords) + '&page=' + page +
-        '&rows=20&spellchecker=true&condition=relation&device=android&version=9.0.75').response;
-      var books = items(r, 'docs').map(function (d) {
+      var host = this.host, kw = String(keywords).replace(/^\s+|\s+$/g, '');
+      if (loggedIn(host)) {
+        try {
+          var album = at(web(host, WEB + '/revision/search/main?core=album&kw=' + encodeURIComponent(kw) + '&page=' + page +
+            '&spellchecker=true&rows=20&condition=relation&device=iPhone&fq=&paidFilter=false'), 'data.album');
+          var found = items(album, 'docs').filter(function (d) { return str(d, 'albumId'); }).map(function (d) {
+            return {
+              bookUrl: albumUrl(str(d, 'albumId')), title: str(d, 'title'), coverUrl: cover(str(d, 'coverPath')), artist: str(d, 'nickname'),
+              intro: str(d, 'customTitle') || str(d, 'intro'),
+              status: finished(d.isFinished) + ' · ' + int(d, 'tracksCount') + ' 集' + (d.isPaid ? ' · 付费' : '')
+            };
+          });
+          if (found.length > 0) return { books: found, totalPage: Math.max(page, int(album, 'totalPage', page)) };
+          host.log('喜马拉雅网页版搜索没有给出结果，改用老接口');
+        } catch (e) {
+          if (e.cancelled) throw e;
+          host.log('喜马拉雅网页版搜索失败，改用老接口：' + e.message);
+        }
+      }
+
+      function old(word, p) {
+        var r = host.getJson('https://search.ximalaya.com/front/v1?core=album&kw=' + encodeURIComponent(word) + '&page=' + p +
+          '&rows=20&spellchecker=true&condition=relation&device=android&version=9.0.75').response;
         return {
-          bookUrl: albumUrl(str(d, 'id')), title: str(d, 'title'), coverUrl: cover(str(d, 'cover_path')), artist: str(d, 'nickname'),
-          intro: str(d, 'custom_title') || str(d, 'intro'),
-          status: finished(d.is_finished) + ' · ' + int(d, 'tracks') + ' 集' + (d.is_paid ? ' · 付费' : '')
+          totalPage: int(r, 'totalPage', p),
+          books: items(r, 'docs').map(function (d) {
+            return {
+              bookUrl: albumUrl(str(d, 'id')), title: str(d, 'title'), coverUrl: cover(str(d, 'cover_path')), artist: str(d, 'nickname'),
+              intro: str(d, 'custom_title') || str(d, 'intro'),
+              status: finished(d.is_finished) + ' · ' + int(d, 'tracks') + ' 集' + (d.is_paid ? ' · 付费' : '')
+            };
+          })
         };
-      });
-      return { books: books, totalPage: Math.max(page, int(r, 'totalPage', page)) };
+      }
+      var result = old(kw, page), books = result.books;
+      if (page === 1 && books.length < 5 && kw.length >= 4 && kw.indexOf(' ') < 0) {
+        var seen = {};
+        books.forEach(function (b) { seen[b.bookUrl] = true; });
+        // 一次去掉一个字，最多试三次，最短留到一半
+        for (var cut = 1; cut <= 3 && kw.length - cut >= Math.max(2, Math.ceil(kw.length / 2)) && books.length < 5; cut++) {
+          try {
+            old(kw.substring(0, kw.length - cut), 1).books.forEach(function (b) {
+              if (!seen[b.bookUrl]) { seen[b.bookUrl] = true; books.push(b); }
+            });
+          } catch (e) { if (e.cancelled) throw e; }
+        }
+      }
+      return { books: books, totalPage: Math.max(page, result.totalPage) };
     },
 
     // 每个频道一组，组里是它的子分类
@@ -104,15 +150,32 @@
       }
       if (!loadEpisodes) return detail;
 
-      try {
-        for (var page = 1; page <= 500; page++) {
+      // 章节列表有两个接口，返回的样子一样：
+      // 平时用第一个（登录后它会标出哪些章节已经买过 / 会员能听）；有些专辑它会说“已下架”，其实在网站和 App 上都能正常听，
+      // 这时换第二个再取。两个都不行才把原因告诉用户
+      var useBackup = false;
+      function trackPage(page) {
+        if (!useBackup) {
           var json = host.getJson('https://mobile.ximalaya.com/mobile/v1/album/track?albumId=' + id + '&pageId=' + page +
             '&pageSize=' + PAGE_SIZE + '&isAsc=true&device=android');
-          // 专辑被下架等情况：接口不给章节，只给一句原因，原样告诉用户
-          if (int(json, 'ret') !== 0 && detail.episodes.length === 0) {
-            throw new Error('喜马拉雅：' + (str(json, 'msg') || '获取章节失败（' + str(json, 'ret') + '）'));
-          }
-          var data = json.data;
+          if (int(json, 'ret') === 0) return json.data;
+          if (page > 1) return null;
+          host.log('喜马拉雅的章节接口说：' + str(json, 'msg') + '（' + str(json, 'ret') + '），换另一个接口再取');
+          useBackup = true;
+          var reason = str(json, 'msg');
+        }
+        var backup = host.getJson('https://mobile.ximalaya.com/mobile/others/ca/album/track/' + id + '/true/' + page + '/' + PAGE_SIZE);
+        if (int(backup, 'ret') !== 0 || !backup.tracks) {
+          if (page > 1) return null;
+          throw new Error('喜马拉雅：' + (reason || str(backup, 'msg') || '获取章节失败（' + str(backup, 'ret') + '）'));
+        }
+        return backup.tracks;
+      }
+
+      try {
+        for (var page = 1; page <= 500; page++) {
+          var data = trackPage(page);
+          if (!data) break;
           items(data, 'list').forEach(function (t) {
             // 付费专辑里也有可以免费试听的章节；已经买过 / 是会员时 isAuthorized 为 true
             detail.episodes.push({ title: str(t, 'title'), url: 'xm:' + str(t, 'trackId'), isFree: !t.isPaid || !!t.isFree || !!t.isAuthorized });
