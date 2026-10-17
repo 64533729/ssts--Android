@@ -101,6 +101,15 @@ function ptcmsSource(cfg) {
   // 令牌 2 小时内对所有目录页有效，解出来以后直接带上 Cookie 请求，不需要 WebView。
   var dirToken = null, dirTokenExpires = 0;
 
+  // 有的站第一次访问会返回 403，同时种下一个 Cookie 让浏览器刷新；带上这个 Cookie 再取一次就正常了
+  function retry403(fn) {
+    try { return fn(); } catch (e) {
+      if (e.status !== 403) throw e;
+      return fn();
+    }
+  }
+  function getDoc(host, url, referer) { return retry403(function () { return Shun.getDoc(host, url, true, referer); }); }
+
   function findLink(doc, texts) {
     var list = doc.select('a');
     for (var i = 0; i < list.length; i++) if (texts.indexOf(list[i].text()) >= 0) return list[i].absUrl('href');
@@ -153,7 +162,7 @@ function ptcmsSource(cfg) {
       var token = Date.now() / 1000 < dirTokenExpires ? dirToken : null;
       var html;
       try {
-        html = host.getString(url, { desktop: true, headers: token ? { Cookie: cfg.cookie + '=' + encodeURIComponent(token) } : {} });
+        html = retry403(function () { return host.getString(url, { desktop: true, headers: token ? { Cookie: cfg.cookie + '=' + encodeURIComponent(token) } : {} }); });
       } catch (e) {
         if (e.status !== 429) throw e;
         if (limited >= 5) {
@@ -187,7 +196,7 @@ function ptcmsSource(cfg) {
   function load(host, bookUrl, known, loadEpisodes, loadFullPages) {
     if (cfg.fixUrl) bookUrl = cfg.fixUrl(bookUrl);
     var list = [];
-    var doc1 = Shun.getDoc(host, bookUrl, true);
+    var doc1 = getDoc(host, bookUrl);
     var artist = [];
     doc1.select('.book-info dd').forEach(function (d) {
       if (artist.length === 0 && d.text().indexOf('演播') === 0) artist = d.select('a').map(function (e) { return e.text(); });
@@ -262,7 +271,7 @@ function ptcmsSource(cfg) {
     return detail;
   }
 
-  var kit = { parseBooks: parseBooks, lastPage: lastPage, nextPageUrl: nextPageUrl, getDir: getDir };
+  var kit = { parseBooks: parseBooks, lastPage: lastPage, nextPageUrl: nextPageUrl, getDir: getDir, getDoc: getDoc, retry403: retry403 };
 
   registerSource({
     id: cfg.id, name: cfg.name, url: SITE,
@@ -270,6 +279,34 @@ function ptcmsSource(cfg) {
     multipleEpisodePages: true,
     loginUrl: SITE + 'user/public/login.html',
     loginDesktop: false,
+    // 登录页是手机版，网站会把手机访问跳到 m. 开头的手机站，所以登录留下的 Cookie 可能只在手机站上。
+    // 先看两个域名的 Cookie 里有没有登录后才有的 PTCMS_userid（昵称在 PTCMS_username，URL 编码）；
+    // 没有的话再打开两边的个人中心：登录后上面有“退出登录”（/user/public/logout.html），没登录会跳到登录页
+    checkLogin: function () {
+      var host = this.host;
+      var sites = [SITE, SITE.replace('://www.', '://m.')];
+      function nameOf(cookie) {
+        var m = /(?:^|;\s*)PTCMS_username=([^;]+)/.exec(cookie);
+        try { return m ? decodeURIComponent(m[1].replace(/\+/g, ' ')) : true; } catch (e) { return true; }
+      }
+      for (var i = 0; i < sites.length; i++) {
+        var cookie = typeof host.cookies === 'function' ? String(host.cookies(sites[i]) || '') : '';
+        if (/(?:^|;\s*)PTCMS_userid=[1-9]/.test(cookie)) return nameOf(cookie);
+      }
+      for (var k = 0; k < sites.length; k++) {
+        var url = sites[k] + 'user/', html;
+        try {
+          html = retry403(function () { return host.getString(url, { desktop: k === 0 }); });
+          // 个人中心也可能先返回一层校验脚本：解出令牌带上再取一次
+          var t = html.indexOf('reversed = "') >= 0 ? readToken(host, html) : null;
+          if (t) html = host.getString(url, { desktop: k === 0, headers: { Cookie: cfg.cookie + '=' + encodeURIComponent(t.token) } });
+        } catch (e) { if (e.cancelled) throw e; continue; }
+        if (html.indexOf('public/logout.html') >= 0) {
+          return nameOf(typeof host.cookies === 'function' ? String(host.cookies(sites[k]) || '') : '');
+        }
+      }
+      throw new Error('还没有登录');
+    },
     coverHeaders: Shun.coverReferer(Shun.hostOf(SITE).replace(/^www\./, ''), SITE),
 
     search: function (keywords, page) { return cfg.search(this.host, keywords, page, kit); },
@@ -277,7 +314,7 @@ function ptcmsSource(cfg) {
     categoryMenus: function () { return cfg.menus(); },
 
     categoryPage: function (url) {
-      var doc = Shun.getDoc(this.host, url, true);
+      var doc = getDoc(this.host, url);
       var current = regexInt(url, /\/(\d+)\.html$/);
       return { books: parseBooks(doc), currentPage: current, totalPage: Math.max(current, lastPage(doc)), nextUrl: nextPageUrl(doc) };
     },
@@ -288,30 +325,37 @@ function ptcmsSource(cfg) {
     updateEpisodes: function (bookUrl, known) { return load(this.host, bookUrl, known, true, true); },
 
     // 播放页同样有 JS 校验；没有专门的取法时交给 WebView 打开并嗅探（电脑版用 jPlayer）
-    audio: function (url) { return cfg.audio ? cfg.audio(this.host, url, kit) : this.host.sniff(url, { desktop: true }); }
+    audio: function (url) {
+      var audio = cfg.audio ? cfg.audio(this.host, url, kit) : this.host.sniff(url, { desktop: true });
+      // 音频放在 ysxs.top 上：有的手机连它的 https 会报“证书链校验失败”（Chain validation failed）而放不了，
+      // 它同样支持 http，改用 http 就不经过证书校验了
+      return typeof audio === 'string' ? audio.replace(/^https:\/\/([^\/]*\.ysxs\.top\/)/, 'http://$1') : audio;
+    }
   });
 }
 
-// 爱听书
-(function () {
-  var SITE = 'https://www.itingshu.net/';
+// 爱听书 www.itingshu.net 和 13听书网 www.ting13.cc：同一个后台（连书号、封面都一样），搜索和分类的写法也一样
+function itingshuLike(cfg) {
+  var SITE = cfg.site;
   var searchPageUrl = {}; // 搜索结果第 2 页起的地址模板，按关键词记住
   ptcmsSource({
-    site: SITE, id: 'e30009d5e6714d89a2692666ddf13cbd', name: '爱听书', cookie: '__51guid__', pageDelay: 6000,
-    description: '推荐指数:4星 ⭐⭐⭐⭐\n有声小说、长篇评书、相声、百家讲坛等。网站限制访问频率，章节很多的书需要一点时间才能加载完。不能播放时先在插件页面“登录”。',
-    // 书架里旧的手机版地址
-    fixUrl: function (url) { return url.replace('://m.itingshu.net/', '://www.itingshu.net/'); },
+    site: SITE, id: cfg.id, name: cfg.name, cookie: '__51guid__', pageDelay: cfg.pageDelay, parallel: cfg.parallel,
+    description: cfg.description,
+    fixUrl: cfg.fixUrl,
+    audio: cfg.audio,
 
     search: function (host, keywords, page, kit) {
       var doc;
       if (page > 1 && searchPageUrl[keywords]) {
         // 不带 Referer 时返回“友情提示信息”页
-        doc = Shun.getDoc(host, searchPageUrl[keywords].replace('{0}', page), true, SITE + 'novelsearch/search/result.html');
+        doc = kit.getDoc(host, searchPageUrl[keywords].replace('{0}', page), SITE + 'novelsearch/search/result.html');
       } else {
-        doc = host.getHtml(SITE + 'novelsearch/search/result.html', {
-          desktop: true, method: 'POST', body: 'searchword=' + Shun.enc(keywords),
-          // 不带 Referer 和 Origin 时网站收不到关键词
-          headers: { Referer: SITE, Origin: SITE.replace(/\/$/, '') }
+        doc = kit.retry403(function () {
+          return host.getHtml(SITE + 'novelsearch/search/result.html', {
+            desktop: true, method: 'POST', body: 'searchword=' + Shun.enc(keywords),
+            // 不带 Referer 和 Origin 时网站收不到关键词
+            headers: { Referer: SITE, Origin: SITE.replace(/\/$/, '') }
+          });
         });
         var next = kit.nextPageUrl(doc);
         if (next) searchPageUrl[keywords] = next.replace(/\/\d+\.html$/, '/{0}.html');
@@ -331,7 +375,22 @@ function ptcmsSource(cfg) {
       ];
     }
   });
-})();
+}
+
+itingshuLike({
+  site: 'https://www.itingshu.net/', id: 'e30009d5e6714d89a2692666ddf13cbd', name: '爱听书', pageDelay: 6000,
+  description: '推荐指数:4星 ⭐⭐⭐⭐\n有声小说、长篇评书、相声、百家讲坛等。网站限制访问频率，章节很多的书需要一点时间才能加载完。不能播放时先在插件页面“登录”。',
+  // 书架里旧的手机版地址
+  fixUrl: function (url) { return url.replace('://m.itingshu.net/', '://www.itingshu.net/'); }
+});
+
+// 13听书网：电脑版播放页里没有播放器，要用手机版的播放页去嗅探音频
+itingshuLike({
+  site: 'https://www.ting13.cc/', id: '7c2e9a41d05b4f3e8a6d1b9c3f2e7a58', name: '13听书网', parallel: 3,
+  description: '有声小说、长篇评书、相声戏曲、百家讲坛、儿童故事等，书很多，和爱听书是同一个后台。章节很多的书加载要一点时间。不能播放时先在插件页面“登录”。',
+  fixUrl: function (url) { return url.replace('://m.ting13.cc/', '://www.ting13.cc/'); },
+  audio: function (host, url) { return host.sniff(url.replace('://www.ting13.cc/', '://m.ting13.cc/'), { desktop: false }); }
+});
 
 // 29听书网 www.ting29.com 和 起点有声网 www.qdysw.com：两个站是同一套程序、同样的分类和页面，连书的编号都一样，只是域名不同
 function ting29Source(SITE, id, name, description) {

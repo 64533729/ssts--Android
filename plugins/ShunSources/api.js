@@ -1479,8 +1479,28 @@
     var json = host.getJson(API + path, o);
     var code = int(json, 'code', 200);
     if (code === 301) throw new Error('需要登录网易云音乐：到插件页点这个源的“登录”');
-    if (code !== 200) throw new Error('网易云音乐：' + (str(json, 'message') || str(json, 'msg') || '接口返回错误 ' + code));
+    if (code !== 200) {
+      var err = new Error('网易云音乐：' + (str(json, 'message') || str(json, 'msg') || '接口返回错误 ' + code));
+      err.code = code;
+      throw err;
+    }
     return json;
+  }
+
+  // 请求太快时网站返回 406“操作频繁，请稍候再试”，十几秒后恢复：等一会儿再试，最多试几次
+  function apiPatient(host, path) {
+    for (var attempt = 0; ; attempt++) {
+      try { return api(host, path); } catch (e) {
+        if (e.code !== 406 || attempt >= 4) {
+          if (e.code === 406) e.rateLimited = true;
+          throw e;
+        }
+        for (var s = 20; s > 0; s--) {
+          host.progress('（网易云限制了访问频率，' + s + ' 秒后继续）');
+          host.sleep(1000);
+        }
+      }
+    }
   }
 
   function bookUrl(id) { return SITE + '/djradio?id=' + id; }
@@ -1558,12 +1578,15 @@
         coverUrl: cover(str(radio, 'picUrl')), episodes: []
       };
       if (!loadEpisodes) return detail;
-      // 节目按期数从前往后排，一页 200 期
-      var size = 200;
+      // 节目按期数从前往后排，一页最多 500 期。网站限制访问频率：连着取五六次后要等十几秒才能再取（歇得再久也差不多），每页之间歇一下，被限制了就等一会儿接着取
+      var size = 500;
       try {
-        for (var offset = 0; offset < 20000; offset += size) {
-          if (offset > 0) host.progress(Math.min(offset + size, int(radio, 'programCount')) + ' / ' + int(radio, 'programCount'));
-          var json = api(host, '/dj/program/byradio?radioId=' + id + '&limit=' + size + '&offset=' + offset + '&asc=true');
+        for (var offset = 0; offset < 50000; offset += size) {
+          if (offset > 0) {
+            host.progress(Math.min(offset + size, int(radio, 'programCount')) + ' / ' + int(radio, 'programCount'));
+            host.sleep(2000);
+          }
+          var json = apiPatient(host, '/dj/program/byradio?radioId=' + id + '&limit=' + size + '&offset=' + offset + '&asc=true');
           var list = items(json, 'programs');
           list.forEach(function (p) {
             var song = str(p, 'mainSong.id') || str(p, 'mainTrackId');
@@ -1576,6 +1599,10 @@
           });
           if (!loadFullPages || json.more !== true || list.length === 0) break;
         }
+      } catch (e) {
+        // 一直被限制：先用已经取到的部分，下次打开这本书时会重新加载
+        if (!e.rateLimited || detail.episodes.length === 0) throw e;
+        host.toast('网易云限制了访问频率，先加载了 ' + detail.episodes.length + ' 期，过一会儿重新打开这本书可以加载全部');
       } finally {
         host.progress(null);
       }

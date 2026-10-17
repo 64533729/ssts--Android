@@ -1,6 +1,6 @@
 {
   "name": "ShunSources",
-  "version": "5.2",
+  "version": "5.3",
   "author": "shun（移植）",
   "description": "听书源合集（从 Windows 版 ShunSources.Plugin 移植）",
   "scripts": ["common.js", "cms.js", "sites.js", "api.js", "zblog.js", "ximalaya.js", "douyin.js"]

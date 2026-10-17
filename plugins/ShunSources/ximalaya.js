@@ -45,6 +45,7 @@
     // 搜索有两条路：
     // 1. 登录了的先用网页版的搜索，结果和在网站上搜的一样（没登录时网页版的搜索会被风控拦住，所以只在登录后用）；
     // 2. 老接口（旧版客户端用的）：不用登录，但匹配很死板，名字差一个字就搜不到。第一页结果太少时，把关键字从后面去掉几个字再搜，补到后面。
+    //    这个接口默认把付费 / 会员专辑全部滤掉，只剩免费的，所以要带上 paidFilter=false。
     search: function (keywords, page) {
       var host = this.host, kw = String(keywords).replace(/^\s+|\s+$/g, '');
       if (loggedIn(host)) {
@@ -68,7 +69,7 @@
 
       function old(word, p) {
         var r = host.getJson('https://search.ximalaya.com/front/v1?core=album&kw=' + encodeURIComponent(word) + '&page=' + p +
-          '&rows=20&spellchecker=true&condition=relation&device=android&version=9.0.75').response;
+          '&rows=20&spellchecker=true&condition=relation&device=android&version=9.0.75&paidFilter=false').response;
         return {
           totalPage: int(r, 'totalPage', p),
           books: items(r, 'docs').map(function (d) {
